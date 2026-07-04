@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import datetime
-import matplotlib.pyplot as plt
 
 st.set_page_config(page_title="Gestor de Morbilidad - Willian Almenar", layout="wide")
 
@@ -114,7 +113,6 @@ def asignar_grupo_etario(edad):
 
 def normalizar_identificacion(df):
     """Normaliza la identificación del paciente para comparación"""
-    # Crear una columna de identificación única
     if 'NUMERO_DOCUMENTO' in df.columns:
         df['IDENTIFICACION'] = df['NUMERO_DOCUMENTO'].astype(str).str.strip()
     elif 'DOCUMENTO' in df.columns:
@@ -122,7 +120,6 @@ def normalizar_identificacion(df):
     else:
         df['IDENTIFICACION'] = df.index.astype(str)
     
-    # Crear nombre completo para comparación adicional
     if 'NOMBRE_PACIENTE' in df.columns and 'APELLIDO_PACIENTE' in df.columns:
         df['NOMBRE_COMPLETO'] = df['NOMBRE_PACIENTE'].astype(str).str.strip() + ' ' + df['APELLIDO_PACIENTE'].astype(str).str.strip()
     elif 'NOMBRE_PACIENTE' in df.columns:
@@ -133,23 +130,18 @@ def normalizar_identificacion(df):
     return df
 
 def analizar_archivo(file, tipo_archivo):
-    """
-    Analiza y procesa un archivo Excel con validación específica para cada tipo
-    """
+    """Analiza y procesa un archivo Excel con validación específica para cada tipo"""
     if file is None:
         return None, "No se ha subido ningún archivo"
     
     try:
-        # Detectar el motor de lectura
         if file.name.endswith('.xls'):
             df = pd.read_excel(file, engine='xlrd', header=0)
         else:
             df = pd.read_excel(file, engine='openpyxl', header=0)
         
-        # Limpiar nombres de columnas (quitar espacios, mayúsculas)
         df.columns = df.columns.str.strip().str.upper()
         
-        # Información básica
         info = {
             "filas": df.shape[0],
             "columnas": df.shape[1],
@@ -159,7 +151,6 @@ def analizar_archivo(file, tipo_archivo):
             "fecha_carga": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
         
-        # Validar columnas esperadas
         columnas_esperadas = EXPECTED_COLUMNS.get(tipo_archivo, [])
         columnas_encontradas = []
         columnas_faltantes = []
@@ -168,7 +159,6 @@ def analizar_archivo(file, tipo_archivo):
             if col in df.columns:
                 columnas_encontradas.append(col)
             else:
-                # Buscar coincidencias parciales
                 coincidencias = [c for c in df.columns if col in c or c in col]
                 if coincidencias:
                     columnas_encontradas.append(coincidencias[0])
@@ -178,20 +168,22 @@ def analizar_archivo(file, tipo_archivo):
         info["columnas_encontradas"] = columnas_encontradas
         info["columnas_faltantes"] = columnas_faltantes
         
-        # Procesar datos según el tipo
         df = procesar_datos(df, tipo_archivo)
-        
-        # Normalizar identificación
         df = normalizar_identificacion(df)
         
-        # Agregar grupo etario si existe columna EDAD
         if 'EDAD' in df.columns:
             df['GRUPO_ETARIO'] = df['EDAD'].apply(asignar_grupo_etario)
         
-        # Detectar duplicados
-        info["duplicados"] = detectar_duplicados(df)
+        # Extraer año y mes para comparaciones temporales
+        if 'FECHA_ATENCION' in df.columns:
+            try:
+                df['AÑO'] = df['FECHA_ATENCION'].dt.year
+                df['MES'] = df['FECHA_ATENCION'].dt.month
+                df['AÑO_MES'] = df['FECHA_ATENCION'].dt.strftime('%Y-%m')
+            except:
+                pass
         
-        # Estadísticas adicionales
+        info["duplicados"] = detectar_duplicados(df)
         info["estadisticas"] = generar_estadisticas(df, tipo_archivo)
         
         return df, info
@@ -203,7 +195,6 @@ def detectar_duplicados(df):
     """Detecta registros duplicados en el dataframe"""
     duplicados_info = {}
     
-    # Duplicados por identificación
     if 'IDENTIFICACION' in df.columns:
         duplicados_identificacion = df[df.duplicated(subset=['IDENTIFICACION'], keep=False)]
         duplicados_info['por_identificacion'] = {
@@ -212,7 +203,6 @@ def detectar_duplicados(df):
             'ejemplos': duplicados_identificacion[['IDENTIFICACION', 'NOMBRE_COMPLETO']].head(10).to_dict('records')
         }
     
-    # Duplicados exactos (todas las columnas)
     duplicados_exactos = df[df.duplicated(keep=False)]
     duplicados_info['exactos'] = {
         'cantidad': len(duplicados_exactos),
@@ -223,16 +213,12 @@ def detectar_duplicados(df):
 
 def procesar_datos(df, tipo_archivo):
     """Procesa datos según el tipo de archivo"""
-    # Convertir fechas si existe la columna
     if 'FECHA_ATENCION' in df.columns:
         try:
             df['FECHA_ATENCION'] = pd.to_datetime(df['FECHA_ATENCION'], errors='coerce')
-            df['AÑO'] = df['FECHA_ATENCION'].dt.year
-            df['MES'] = df['FECHA_ATENCION'].dt.month
         except:
             pass
     
-    # Convertir EDAD a numérico
     if 'EDAD' in df.columns:
         try:
             df['EDAD'] = pd.to_numeric(df['EDAD'], errors='coerce')
@@ -245,19 +231,15 @@ def generar_estadisticas(df, tipo_archivo):
     """Genera estadísticas relevantes para cada tipo de archivo"""
     estadisticas = {}
     
-    # Estadísticas generales
     estadisticas["total_registros"] = len(df)
     estadisticas["columnas_totales"] = len(df.columns)
     
-    # Pacientes únicos
     if 'IDENTIFICACION' in df.columns:
         estadisticas["pacientes_unicos"] = df['IDENTIFICACION'].nunique()
     
-    # Estadísticas por tipo
     if 'CODIGO_CIE10' in df.columns:
         try:
             estadisticas["diagnosticos_unicos"] = df['CODIGO_CIE10'].nunique()
-            estadisticas["top_diagnosticos"] = df['CODIGO_CIE10'].value_counts().head(10).to_dict()
         except:
             estadisticas["diagnosticos_unicos"] = 0
     
@@ -274,18 +256,263 @@ def generar_estadisticas(df, tipo_archivo):
                 estadisticas["edad_promedio"] = round(df_edad.mean(), 2)
                 estadisticas["edad_min"] = df_edad.min()
                 estadisticas["edad_max"] = df_edad.max()
-                estadisticas["edad_mediana"] = df_edad.median()
         except:
             pass
     
-    # Distribución por grupo etario
     if 'GRUPO_ETARIO' in df.columns:
         try:
             estadisticas["distribucion_grupo_etario"] = df['GRUPO_ETARIO'].value_counts().to_dict()
         except:
             pass
     
+    # Estadísticas temporales (mensuales y anuales)
+    if 'AÑO' in df.columns and 'MES' in df.columns:
+        try:
+            # Conteo anual
+            estadisticas["conteo_anual"] = df['AÑO'].value_counts().sort_index().to_dict()
+            
+            # Conteo mensual (agrupado por año y mes)
+            conteo_mensual = df.groupby(['AÑO', 'MES']).size().reset_index(name='conteo')
+            estadisticas["conteo_mensual"] = conteo_mensual.to_dict('records')
+            
+            # Conteo mensual por fuente (para comparación)
+            estadisticas["conteo_por_mes"] = df.groupby(['AÑO', 'MES']).size().to_dict()
+        except:
+            pass
+    
     return estadisticas
+
+def comparar_registros_temporales(dataframes):
+    """Compara los registros mensual y anualmente entre las tres fuentes"""
+    
+    st.subheader("📊 Comparación Mensual y Anual entre Reportes")
+    
+    if len(dataframes) < 2:
+        st.warning("Se necesitan al menos 2 fuentes para comparar")
+        return
+    
+    # Extraer datos temporales de cada fuente
+    datos_temporales = {}
+    
+    for nombre, df in dataframes.items():
+        if 'AÑO' in df.columns and 'MES' in df.columns:
+            # Conteo mensual
+            mensual = df.groupby(['AÑO', 'MES']).size().reset_index(name='conteo')
+            mensual['PERIODO'] = mensual['AÑO'].astype(str) + '-' + mensual['MES'].astype(str).str.zfill(2)
+            
+            # Conteo anual
+            anual = df['AÑO'].value_counts().sort_index().reset_index()
+            anual.columns = ['AÑO', 'conteo']
+            
+            datos_temporales[nombre] = {
+                'mensual': mensual,
+                'anual': anual,
+                'total': len(df)
+            }
+    
+    if len(datos_temporales) < 2:
+        st.warning("No se encontraron datos temporales (año/mes) en los reportes")
+        return
+    
+    fuentes = list(datos_temporales.keys())
+    
+    # 1. COMPARACIÓN ANUAL
+    st.write("### 📅 Comparación Anual")
+    
+    # Crear tabla comparativa anual
+    anual_comparativa = {}
+    for fuente in fuentes:
+        anual_df = datos_temporales[fuente]['anual']
+        for _, row in anual_df.iterrows():
+            año = int(row['AÑO'])
+            if año not in anual_comparativa:
+                anual_comparativa[año] = {}
+            anual_comparativa[año][fuente] = row['conteo']
+    
+    # Completar años faltantes
+    todos_años = sorted(set([año for año in anual_comparativa.keys()]))
+    df_anual = pd.DataFrame(anual_comparativa).T.fillna(0)
+    df_anual.index.name = 'Año'
+    
+    st.dataframe(df_anual, use_container_width=True)
+    
+    # Gráfico de barras anual
+    st.bar_chart(df_anual)
+    
+    # Detectar inconsistencias anuales
+    st.write("### ⚠️ Inconsistencias Anuales")
+    
+    inconsistencias_anuales = []
+    for año in df_anual.index:
+        valores = df_anual.loc[año].values
+        if len(set(valores)) > 1:
+            max_val = max(valores)
+            min_val = min(valores)
+            if max_val > 0:
+                diff_pct = ((max_val - min_val) / max_val) * 100
+                inconsistencias_anuales.append({
+                    'Año': año,
+                    'Diferencia': max_val - min_val,
+                    'Porcentaje': f"{diff_pct:.1f}%",
+                    'Detalle': {fuente: int(val) for fuente, val in df_anual.loc[año].items()}
+                })
+    
+    if inconsistencias_anuales:
+        st.markdown('<div class="danger-box">', unsafe_allow_html=True)
+        st.write(f"**⚠️ Se encontraron {len(inconsistencias_anuales)} años con inconsistencias**")
+        
+        for inc in inconsistencias_anuales:
+            st.write(f"**Año {inc['Año']}:** Diferencia de {inc['Diferencia']:,} registros ({inc['Porcentaje']})")
+            for fuente, valor in inc['Detalle'].items():
+                st.write(f"  - {fuente}: {valor:,} registros")
+        st.markdown('</div>', unsafe_allow_html=True)
+    else:
+        st.success("✅ Todos los años tienen la misma cantidad de registros en todas las fuentes")
+    
+    # 2. COMPARACIÓN MENSUAL
+    st.write("### 📆 Comparación Mensual")
+    
+    # Crear tabla comparativa mensual
+    mensual_comparativa = {}
+    for fuente in fuentes:
+        mensual_df = datos_temporales[fuente]['mensual']
+        for _, row in mensual_df.iterrows():
+            periodo = row['PERIODO']
+            if periodo not in mensual_comparativa:
+                mensual_comparativa[periodo] = {}
+            mensual_comparativa[periodo][fuente] = row['conteo']
+    
+    # Completar periodos faltantes
+    todos_periodos = sorted(mensual_comparativa.keys())
+    df_mensual = pd.DataFrame(mensual_comparativa).T.fillna(0)
+    df_mensual.index.name = 'Periodo'
+    
+    # Mostrar solo los primeros 12 periodos para no saturar
+    if len(df_mensual) > 12:
+        st.write(f"Mostrando los últimos 12 meses (total {len(df_mensual)} meses)")
+        df_mensual_mostrar = df_mensual.tail(12)
+    else:
+        df_mensual_mostrar = df_mensual
+    
+    st.dataframe(df_mensual_mostrar, use_container_width=True)
+    
+    # Gráfico de barras mensual
+    st.bar_chart(df_mensual_mostrar)
+    
+    # Detectar inconsistencias mensuales
+    st.write("### ⚠️ Inconsistencias Mensuales")
+    
+    inconsistencias_mensuales = []
+    for periodo in df_mensual.index:
+        valores = df_mensual.loc[periodo].values
+        if len(set(valores)) > 1:
+            max_val = max(valores)
+            min_val = min(valores)
+            if max_val > 0:
+                diff_pct = ((max_val - min_val) / max_val) * 100
+                inconsistencias_mensuales.append({
+                    'Periodo': periodo,
+                    'Diferencia': max_val - min_val,
+                    'Porcentaje': f"{diff_pct:.1f}%",
+                    'Detalle': {fuente: int(val) for fuente, val in df_mensual.loc[periodo].items()}
+                })
+    
+    if inconsistencias_mensuales:
+        st.markdown('<div class="danger-box">', unsafe_allow_html=True)
+        st.write(f"**⚠️ Se encontraron {len(inconsistencias_mensuales)} meses con inconsistencias**")
+        
+        # Mostrar solo los primeros 10 para no saturar
+        for inc in inconsistencias_mensuales[:10]:
+            st.write(f"**{inc['Periodo']}:** Diferencia de {inc['Diferencia']:,} registros ({inc['Porcentaje']})")
+            for fuente, valor in inc['Detalle'].items():
+                st.write(f"  - {fuente}: {valor:,} registros")
+        
+        if len(inconsistencias_mensuales) > 10:
+            st.write(f"... y {len(inconsistencias_mensuales) - 10} meses más con inconsistencias")
+        
+        st.markdown('</div>', unsafe_allow_html=True)
+    else:
+        st.success("✅ Todos los meses tienen la misma cantidad de registros en todas las fuentes")
+    
+    # 3. REPORTE DE INCONSISTENCIAS
+    st.write("### 📋 Reporte de Inconsistencias")
+    
+    if inconsistencias_anuales or inconsistencias_mensuales:
+        reporte = "REPORTE DE INCONSISTENCIAS TEMPORALES\n"
+        reporte += "="*60 + "\n"
+        reporte += f"Fecha de generación: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        
+        if inconsistencias_anuales:
+            reporte += "📅 INCONSISTENCIAS ANUALES:\n"
+            reporte += "-"*40 + "\n"
+            for inc in inconsistencias_anuales:
+                reporte += f"\nAño {inc['Año']}:\n"
+                reporte += f"  Diferencia: {inc['Diferencia']} registros ({inc['Porcentaje']})\n"
+                for fuente, valor in inc['Detalle'].items():
+                    reporte += f"  - {fuente}: {valor} registros\n"
+        
+        if inconsistencias_mensuales:
+            reporte += "\n📆 INCONSISTENCIAS MENSUALES (primeros 20):\n"
+            reporte += "-"*40 + "\n"
+            for inc in inconsistencias_mensuales[:20]:
+                reporte += f"\n{inc['Periodo']}:\n"
+                reporte += f"  Diferencia: {inc['Diferencia']} registros ({inc['Porcentaje']})\n"
+                for fuente, valor in inc['Detalle'].items():
+                    reporte += f"  - {fuente}: {valor} registros\n"
+        
+        st.download_button(
+            label="📥 Descargar Reporte de Inconsistencias",
+            data=reporte,
+            file_name=f"reporte_inconsistencias_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+            mime="text/plain"
+        )
+    else:
+        st.success("🎉 ¡No se encontraron inconsistencias! Todos los reportes coinciden mensual y anualmente.")
+
+def verificar_igualdad_pacientes(dataframes):
+    """Verifica específicamente si la cantidad de pacientes es igual en los tres reportes"""
+    
+    st.subheader("✅ Verificación de Igualdad de Pacientes")
+    
+    if len(dataframes) < 3:
+        st.warning("Se necesitan los 3 reportes para verificar igualdad")
+        return
+    
+    pacientes_por_fuente = {}
+    for nombre, df in dataframes.items():
+        if 'IDENTIFICACION' in df.columns:
+            pacientes_por_fuente[nombre] = df['IDENTIFICACION'].nunique()
+    
+    if len(pacientes_por_fuente) == 3:
+        col1, col2, col3 = st.columns(3)
+        
+        with col1:
+            st.metric("SISPRO", f"{pacientes_por_fuente.get('SISPRO', 0):,}")
+        with col2:
+            st.metric("EPI12", f"{pacientes_por_fuente.get('EPI12', 0):,}")
+        with col3:
+            st.metric("EPI15", f"{pacientes_por_fuente.get('EPI15', 0):,}")
+        
+        valores = list(pacientes_por_fuente.values())
+        if len(set(valores)) == 1:
+            st.success("🎉 ¡TODOS LOS REPORTES TIENEN LA MISMA CANTIDAD DE PACIENTES!")
+            st.balloons()
+        else:
+            st.warning("⚠️ Los reportes tienen DIFERENTE cantidad de pacientes")
+            
+            # Mostrar diferencias detalladas
+            max_pac = max(valores)
+            min_pac = min(valores)
+            
+            st.write(f"**Diferencia máxima:** {max_pac - min_pac:,} pacientes")
+            st.write(f"**Porcentaje de diferencia:** {((max_pac - min_pac) / max_pac) * 100:.2f}%")
+            
+            # Identificar qué fuente tiene más/menos
+            for nombre, cantidad in pacientes_por_fuente.items():
+                if cantidad == max_pac:
+                    st.info(f"📈 **{nombre}** tiene la mayor cantidad: {cantidad:,} pacientes")
+                elif cantidad == min_pac:
+                    st.warning(f"📉 **{nombre}** tiene la menor cantidad: {cantidad:,} pacientes")
 
 def mostrar_analisis(df, info, tipo_archivo):
     """Muestra el análisis detallado del archivo"""
@@ -314,332 +541,6 @@ def mostrar_analisis(df, info, tipo_archivo):
             if 'edad_promedio' in estadisticas:
                 st.write(f"**Edad promedio:** {estadisticas['edad_promedio']} años")
                 st.write(f"**Rango de edad:** {estadisticas.get('edad_min', 'N/A')} - {estadisticas.get('edad_max', 'N/A')} años")
-                st.write(f"**Edad mediana:** {estadisticas.get('edad_mediana', 'N/A')} años")
-            if 'distribucion_sexo' in estadisticas:
-                st.write("**Distribución por sexo:**")
-                for sexo, count in estadisticas['distribucion_sexo'].items():
-                    st.write(f"- {sexo}: {count}")
-
-def validar_consistencia_pacientes(dataframes):
-    """Valida la consistencia de pacientes entre las tres fuentes"""
-    
-    if len(dataframes) < 2:
-        st.warning("Se necesitan al menos 2 fuentes para comparar")
-        return
-    
-    st.subheader("🔍 Validación de Consistencia de Pacientes")
-    
-    # Extraer identificaciones de cada fuente
-    identificaciones = {}
-    nombres_completos = {}
-    
-    for nombre, df in dataframes.items():
-        if 'IDENTIFICACION' in df.columns:
-            identificaciones[nombre] = set(df['IDENTIFICACION'].dropna().astype(str))
-            if 'NOMBRE_COMPLETO' in df.columns:
-                # Crear un diccionario de identificación -> nombre
-                nombres_completos[nombre] = df.set_index('IDENTIFICACION')['NOMBRE_COMPLETO'].to_dict()
-    
-    if len(identificaciones) >= 2:
-        # Análisis de conjuntos
-        fuentes = list(identificaciones.keys())
-        
-        # Pacientes únicos por fuente
-        st.write("### 📊 Resumen de Pacientes por Fuente")
-        resumen_pacientes = []
-        for fuente in fuentes:
-            resumen_pacientes.append({
-                'Fuente': fuente,
-                'Pacientes únicos': len(identificaciones[fuente]),
-                'Total registros': len(dataframes[fuente])
-            })
-        st.dataframe(pd.DataFrame(resumen_pacientes), use_container_width=True)
-        
-        # Comparaciones entre pares
-        st.write("### 🔄 Comparación entre Fuentes")
-        
-        for i in range(len(fuentes)):
-            for j in range(i+1, len(fuentes)):
-                fuente1, fuente2 = fuentes[i], fuentes[j]
-                set1, set2 = identificaciones[fuente1], identificaciones[fuente2]
-                
-                # Calcular intersecciones y diferencias
-                comunes = set1 & set2
-                solo_fuente1 = set1 - set2
-                solo_fuente2 = set2 - set1
-                
-                # Crear métricas visuales
-                col1, col2, col3, col4 = st.columns(4)
-                
-                with col1:
-                    st.markdown(f"**{fuente1} vs {fuente2}**")
-                
-                with col2:
-                    st.metric(
-                        "Pacientes comunes",
-                        f"{len(comunes):,}",
-                        f"{len(comunes)/len(set1)*100:.1f}% del total"
-                    )
-                
-                with col3:
-                    st.metric(
-                        f"Solo en {fuente1}",
-                        f"{len(solo_fuente1):,}",
-                        f"{len(solo_fuente1)/len(set1)*100:.1f}%"
-                    )
-                
-                with col4:
-                    st.metric(
-                        f"Solo en {fuente2}",
-                        f"{len(solo_fuente2):,}",
-                        f"{len(solo_fuente2)/len(set2)*100:.1f}%"
-                    )
-                
-                # Mostrar ejemplos de pacientes no comunes
-                with st.expander(f"Ver detalles de pacientes no comunes entre {fuente1} y {fuente2}"):
-                    col_a, col_b = st.columns(2)
-                    
-                    with col_a:
-                        if solo_fuente1:
-                            st.write(f"**Pacientes solo en {fuente1} (primeros 10):**")
-                            ejemplos_solo1 = list(solo_fuente1)[:10]
-                            for ident in ejemplos_solo1:
-                                nombre = nombres_completos.get(fuente1, {}).get(ident, ident)
-                                st.write(f"- {nombre} (ID: {ident})")
-                    
-                    with col_b:
-                        if solo_fuente2:
-                            st.write(f"**Pacientes solo en {fuente2} (primeros 10):**")
-                            ejemplos_solo2 = list(solo_fuente2)[:10]
-                            for ident in ejemplos_solo2:
-                                nombre = nombres_completos.get(fuente2, {}).get(ident, ident)
-                                st.write(f"- {nombre} (ID: {ident})")
-        
-        # Análisis de consistencia general
-        st.write("### 📈 Análisis de Consistencia General")
-        
-        # Encontrar pacientes en todas las fuentes
-        if len(fuentes) >= 3:
-            conjunto_todas = set.intersection(*[identificaciones[f] for f in fuentes])
-            st.metric("Pacientes presentes en todas las fuentes", len(conjunto_todas))
-            
-            # Encontrar pacientes en al menos 2 fuentes
-            conjunto_al_menos_dos = set()
-            for i in range(len(fuentes)):
-                for j in range(i+1, len(fuentes)):
-                    conjunto_al_menos_dos.update(identificaciones[fuentes[i]] & identificaciones[fuentes[j]])
-            
-            st.metric("Pacientes en al menos 2 fuentes", len(conjunto_al_menos_dos))
-        
-        # Diagrama de Venn (textual)
-        st.write("### 🎯 Resumen de Intersecciones")
-        
-        # Crear tabla de intersecciones
-        intersecciones_data = []
-        for fuente in fuentes:
-            intersecciones_data.append({
-                'Fuente': fuente,
-                'Total únicos': len(identificaciones[fuente]),
-                'Comunes con otras': sum([len(identificaciones[fuente] & identificaciones[otra]) for otra in fuentes if otra != fuente]),
-                'Exclusivos': len(identificaciones[fuente] - set.union(*[identificaciones[otra] for otra in fuentes if otra != fuente]))
-            })
-        
-        st.dataframe(pd.DataFrame(intersecciones_data), use_container_width=True)
-
-def detectar_posibles_duplicados(dataframes):
-    """Detecta posibles datos duplicados o multiplicados en los reportes"""
-    
-    st.subheader("⚠️ Detección de Posibles Duplicados o Multiplicados")
-    
-    for nombre, df in dataframes.items():
-        st.write(f"### 📋 {nombre}")
-        
-        # 1. Duplicados por identificación
-        if 'IDENTIFICACION' in df.columns:
-            duplicados_id = df[df.duplicated(subset=['IDENTIFICACION'], keep=False)]
-            
-            if len(duplicados_id) > 0:
-                st.markdown(f'<div class="danger-box">', unsafe_allow_html=True)
-                st.write(f"**⚠️ Se encontraron {len(duplicados_id):,} registros con identificación duplicada**")
-                st.write(f"**Pacientes con duplicados:** {duplicados_id['IDENTIFICACION'].nunique():,}")
-                
-                # Mostrar estadísticas de duplicados
-                duplicados_stats = duplicados_id.groupby('IDENTIFICACION').size().reset_index(name='conteo')
-                duplicados_stats = duplicados_stats[duplicados_stats['conteo'] > 1]
-                
-                st.write("**Frecuencia de duplicados:**")
-                freq_duplicados = duplicados_stats['conteo'].value_counts().sort_index()
-                st.dataframe(pd.DataFrame({
-                    'Veces repetido': freq_duplicados.index,
-                    'Número de pacientes': freq_duplicados.values
-                }), use_container_width=True)
-                
-                # Mostrar ejemplos
-                with st.expander(f"Ver ejemplos de pacientes duplicados (primeros 10)"):
-                    ejemplos = duplicados_id[['IDENTIFICACION', 'NOMBRE_COMPLETO']].drop_duplicates().head(10)
-                    for idx, row in ejemplos.iterrows():
-                        count = len(duplicados_id[duplicados_id['IDENTIFICACION'] == row['IDENTIFICACION']])
-                        st.write(f"- {row['NOMBRE_COMPLETO']} (ID: {row['IDENTIFICACION']}) - aparece {count} veces")
-                
-                st.markdown('</div>', unsafe_allow_html=True)
-            else:
-                st.success("✅ No se encontraron duplicados por identificación")
-        
-        # 2. Duplicados exactos (todas las columnas)
-        duplicados_exactos = df[df.duplicated(keep=False)]
-        if len(duplicados_exactos) > 0:
-            st.markdown(f'<div class="warning-box">', unsafe_allow_html=True)
-            st.write(f"**⚠️ Se encontraron {len(duplicados_exactos):,} registros exactamente duplicados**")
-            st.write(f"**Registros únicos duplicados:** {len(duplicados_exactos) // 2}")
-            st.markdown('</div>', unsafe_allow_html=True)
-        else:
-            st.success("✅ No se encontraron duplicados exactos")
-        
-        # 3. Posibles multiplicación por EPS o diagnóstico
-        if 'CODIGO_EPS' in df.columns and 'IDENTIFICACION' in df.columns:
-            # Verificar si un paciente aparece en múltiples EPS
-            pacientes_multi_eps = df.groupby('IDENTIFICACION')['CODIGO_EPS'].nunique()
-            pacientes_multi_eps = pacientes_multi_eps[pacientes_multi_eps > 1]
-            
-            if len(pacientes_multi_eps) > 0:
-                st.markdown(f'<div class="warning-box">', unsafe_allow_html=True)
-                st.write(f"**⚠️ {len(pacientes_multi_eps):,} pacientes aparecen en múltiples EPS**")
-                
-                with st.expander("Ver ejemplos"):
-                    ejemplos_multi = pacientes_multi_eps.head(10)
-                    for ident, num_eps in ejemplos_multi.items():
-                        eps_list = df[df['IDENTIFICACION'] == ident]['CODIGO_EPS'].unique()
-                        st.write(f"- ID: {ident} - {num_eps} EPS: {', '.join(eps_list)}")
-                
-                st.markdown('</div>', unsafe_allow_html=True)
-        
-        # 4. Verificar proporción registros vs pacientes únicos
-        if 'IDENTIFICACION' in df.columns:
-            total_registros = len(df)
-            pacientes_unicos = df['IDENTIFICACION'].nunique()
-            ratio = total_registros / pacientes_unicos if pacientes_unicos > 0 else 0
-            
-            st.write("**📊 Proporción Registros/Pacientes:**")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                st.metric("Total Registros", f"{total_registros:,}")
-            with col2:
-                st.metric("Pacientes Únicos", f"{pacientes_unicos:,}")
-            with col3:
-                st.metric("Ratio", f"{ratio:.2f} registros/paciente")
-            
-            if ratio > 2:
-                st.warning(f"⚠️ El ratio es alto ({ratio:.2f}). Puede indicar multiplicación de datos.")
-            elif ratio > 1.5:
-                st.info(f"ℹ️ El ratio es moderado ({ratio:.2f}). Puede haber algunos pacientes con múltiples atenciones.")
-            else:
-                st.success(f"✅ El ratio es bajo ({ratio:.2f}). La mayoría de pacientes tienen una atención.")
-
-def verificar_consistencia_totales(dataframes):
-    """Verifica la consistencia en los totales entre los tres reportes"""
-    
-    if len(dataframes) < 2:
-        return
-    
-    st.subheader("📊 Verificación de Consistencia de Totales")
-    
-    # Crear tabla comparativa de totales
-    comparativa_totales = []
-    
-    for nombre, df in dataframes.items():
-        total_registros = len(df)
-        pacientes_unicos = df['IDENTIFICACION'].nunique() if 'IDENTIFICACION' in df.columns else 0
-        diagnosticos_unicos = df['CODIGO_CIE10'].nunique() if 'CODIGO_CIE10' in df.columns else 0
-        
-        comparativa_totales.append({
-            'Fuente': nombre,
-            'Total Registros': total_registros,
-            'Pacientes Únicos': pacientes_unicos,
-            'Diagnósticos Únicos': diagnosticos_unicos,
-            'Promedio Atenciones/Paciente': round(total_registros / pacientes_unicos, 2) if pacientes_unicos > 0 else 0
-        })
-    
-    df_comparativa = pd.DataFrame(comparativa_totales)
-    
-    # Mostrar tabla
-    st.dataframe(df_comparativa, use_container_width=True)
-    
-    # Verificar diferencias significativas
-    if len(df_comparativa) >= 2:
-        st.write("### 📈 Análisis de Diferencias")
-        
-        # Calcular diferencias porcentuales
-        totales = df_comparativa['Total Registros'].values
-        promedio = np.mean(totales)
-        
-        for idx, row in df_comparativa.iterrows():
-            diferencia = ((row['Total Registros'] - promedio) / promedio) * 100
-            color = "🟢" if abs(diferencia) < 5 else "🟡" if abs(diferencia) < 15 else "🔴"
-            
-            st.write(f"{color} **{row['Fuente']}:** {row['Total Registros']:,} registros "
-                    f"({diferencia:+.1f}% del promedio de {promedio:,.0f})")
-            
-            if abs(diferencia) > 15:
-                st.warning(f"⚠️ {row['Fuente']} muestra una diferencia significativa del {diferencia:.1f}% respecto al promedio")
-        
-        # Comparativa de pacientes únicos
-        st.write("### 👥 Comparativa de Pacientes Únicos")
-        
-        pacientes = df_comparativa['Pacientes Únicos'].values
-        promedio_pacientes = np.mean(pacientes)
-        
-        for idx, row in df_comparativa.iterrows():
-            diferencia = ((row['Pacientes Únicos'] - promedio_pacientes) / promedio_pacientes) * 100
-            color = "🟢" if abs(diferencia) < 5 else "🟡" if abs(diferencia) < 15 else "🔴"
-            
-            st.write(f"{color} **{row['Fuente']}:** {row['Pacientes Únicos']:,} pacientes "
-                    f"({diferencia:+.1f}% del promedio de {promedio_pacientes:,.0f})")
-
-def mostrar_analisis_detallado(df, info, tipo_archivo):
-    """Muestra análisis detallado incluyendo distribución de grupos etarios"""
-    
-    if info is None or df is None:
-        st.error("No se pudo cargar el archivo")
-        return
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown('<div class="success-box">', unsafe_allow_html=True)
-        st.subheader("📊 Resumen del Archivo")
-        st.write(f"**Tipo:** {tipo_archivo}")
-        st.write(f"**Registros:** {info['filas']:,}")
-        st.write(f"**Pacientes únicos:** {info.get('estadisticas', {}).get('pacientes_unicos', 'N/A')}")
-        st.write(f"**Columnas:** {info['columnas']}")
-        st.write(f"**Fecha de carga:** {info['fecha_carga']}")
-        st.markdown('</div>', unsafe_allow_html=True)
-    
-    with col2:
-        if info.get("estadisticas"):
-            st.subheader("📈 Estadísticas")
-            estadisticas = info["estadisticas"]
-            st.write(f"**Diagnósticos únicos:** {estadisticas.get('diagnosticos_unicos', 'N/A')}")
-            if 'edad_promedio' in estadisticas:
-                st.write(f"**Edad promedio:** {estadisticas['edad_promedio']} años")
-                st.write(f"**Rango de edad:** {estadisticas.get('edad_min', 'N/A')} - {estadisticas.get('edad_max', 'N/A')} años")
-                st.write(f"**Edad mediana:** {estadisticas.get('edad_mediana', 'N/A')} años")
-            if 'distribucion_sexo' in estadisticas:
-                st.write("**Distribución por sexo:**")
-                for sexo, count in estadisticas['distribucion_sexo'].items():
-                    st.write(f"- {sexo}: {count}")
-    
-    # Mostrar distribución de grupos etarios
-    if 'GRUPO_ETARIO' in df.columns:
-        st.subheader("📊 Distribución por Grupo Etario")
-        distribucion = df['GRUPO_ETARIO'].value_counts()
-        distribucion = distribucion[distribucion.index != 'Sin dato']
-        
-        if len(distribucion) > 0:
-            col1, col2 = st.columns(2)
-            with col1:
-                st.dataframe(distribucion, use_container_width=True)
-            with col2:
-                st.bar_chart(distribucion)
 
 # Inicializar session_state
 if 'dataframes' not in st.session_state:
@@ -723,24 +624,20 @@ with tab2:
             info = st.session_state.infos.get(fuente_seleccionada, {})
             
             st.subheader(f"📊 Análisis Detallado - {fuente_seleccionada}")
+            mostrar_analisis(df, info, fuente_seleccionada)
             
-            # Mostrar análisis completo
-            mostrar_analisis_detallado(df, info, fuente_seleccionada)
-            
-            # Mostrar detección de duplicados
-            if info.get("duplicados"):
-                st.subheader("🔍 Detección de Duplicados")
-                duplicados = info["duplicados"]
+            # Mostrar distribución de grupos etarios
+            if 'GRUPO_ETARIO' in df.columns:
+                st.subheader("📊 Distribución por Grupo Etario")
+                distribucion = df['GRUPO_ETARIO'].value_counts()
+                distribucion = distribucion[distribucion.index != 'Sin dato']
                 
-                if duplicados.get('por_identificacion', {}).get('cantidad', 0) > 0:
-                    st.warning(f"⚠️ Se encontraron {duplicados['por_identificacion']['cantidad']} registros con identificación duplicada")
-                else:
-                    st.success("✅ No se encontraron duplicados por identificación")
-                
-                if duplicados.get('exactos', {}).get('cantidad', 0) > 0:
-                    st.warning(f"⚠️ Se encontraron {duplicados['exactos']['cantidad']} registros exactamente duplicados")
-                else:
-                    st.success("✅ No se encontraron duplicados exactos")
+                if len(distribucion) > 0:
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        st.dataframe(distribucion, use_container_width=True)
+                    with col2:
+                        st.bar_chart(distribucion)
     else:
         st.info("ℹ️ No hay archivos cargados. Por favor, carga archivos en la pestaña 'Carga de Archivos'")
 
@@ -748,18 +645,13 @@ with tab3:
     st.header("🔍 Validación de Consistencia de Datos")
     
     if st.session_state.dataframes:
-        # Validar consistencia de pacientes
-        validar_consistencia_pacientes(st.session_state.dataframes)
+        # Verificar igualdad de pacientes
+        verificar_igualdad_pacientes(st.session_state.dataframes)
         
         st.markdown("---")
         
-        # Detectar posibles duplicados
-        detectar_posibles_duplicados(st.session_state.dataframes)
-        
-        st.markdown("---")
-        
-        # Verificar consistencia de totales
-        verificar_consistencia_totales(st.session_state.dataframes)
+        # Comparar registros temporales (mensual y anual)
+        comparar_registros_temporales(st.session_state.dataframes)
     else:
         st.info("ℹ️ No hay archivos cargados para validar")
 
@@ -770,7 +662,6 @@ with tab4:
         # Mostrar comparativa de grupos etarios
         st.subheader("📊 Comparativa por Grupo Etario")
         
-        # Preparar datos para comparativa de grupos etarios
         comparativa_data = []
         for nombre, df in st.session_state.dataframes.items():
             if 'GRUPO_ETARIO' in df.columns:
@@ -814,7 +705,6 @@ with tab5:
     if st.session_state.dataframes:
         st.subheader("📊 Resumen General de Todos los Reportes")
         
-        # Crear resumen consolidado
         resumen_consolidado = []
         for nombre, df in st.session_state.dataframes.items():
             info = st.session_state.infos.get(nombre, {})
@@ -825,8 +715,7 @@ with tab5:
                 'Registros': len(df),
                 'Pacientes Únicos': estadisticas.get('pacientes_unicos', 'N/A'),
                 'Diagnósticos Únicos': estadisticas.get('diagnosticos_unicos', 'N/A'),
-                'Edad Promedio': estadisticas.get('edad_promedio', 'N/A'),
-                'Rango Edad': f"{estadisticas.get('edad_min', 'N/A')} - {estadisticas.get('edad_max', 'N/A')}" if 'edad_min' in estadisticas else 'N/A'
+                'Edad Promedio': estadisticas.get('edad_promedio', 'N/A')
             })
         
         st.dataframe(pd.DataFrame(resumen_consolidado), use_container_width=True)
@@ -845,7 +734,6 @@ with tab5:
                         for nombre, df in st.session_state.dataframes.items():
                             df.to_excel(writer, sheet_name=nombre[:31], index=False)
                         
-                        # Añadir hoja de resumen
                         resumen_df = pd.DataFrame(resumen_consolidado)
                         resumen_df.to_excel(writer, sheet_name='Resumen', index=False)
                     
@@ -859,66 +747,6 @@ with tab5:
                     st.success("Reporte exportado exitosamente!")
                 except Exception as e:
                     st.error(f"Error al exportar: {str(e)}")
-        
-        with col2:
-            # Generar reporte de validación
-            if st.button("📄 Generar Reporte de Validación"):
-                reporte = "REPORTE DE VALIDACIÓN DE DATOS\n"
-                reporte += "="*60 + "\n"
-                reporte += f"Fecha de generación: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-                
-                for nombre, df in st.session_state.dataframes.items():
-                    info = st.session_state.infos.get(nombre, {})
-                    estadisticas = info.get('estadisticas', {})
-                    duplicados = info.get('duplicados', {})
-                    
-                    reporte += f"📊 {nombre}\n"
-                    reporte += "-"*40 + "\n"
-                    reporte += f"Total registros: {len(df)}\n"
-                    reporte += f"Pacientes únicos: {estadisticas.get('pacientes_unicos', 'N/A')}\n"
-                    reporte += f"Diagnósticos únicos: {estadisticas.get('diagnosticos_unicos', 'N/A')}\n"
-                    reporte += f"Edad promedio: {estadisticas.get('edad_promedio', 'N/A')} años\n"
-                    
-                    # Información de duplicados
-                    if duplicados:
-                        por_id = duplicados.get('por_identificacion', {})
-                        exactos = duplicados.get('exactos', {})
-                        reporte += f"\n⚠️ DUPLICADOS:\n"
-                        reporte += f"  - Por identificación: {por_id.get('cantidad', 0)} registros\n"
-                        reporte += f"  - Exactos: {exactos.get('cantidad', 0)} registros\n"
-                    
-                    reporte += "\n"
-                
-                # Agregar comparativa de pacientes
-                reporte += "\n" + "="*60 + "\n"
-                reporte += "COMPARATIVA DE PACIENTES ENTRE FUENTES\n"
-                reporte += "="*60 + "\n"
-                
-                identificaciones = {}
-                for nombre, df in st.session_state.dataframes.items():
-                    if 'IDENTIFICACION' in df.columns:
-                        identificaciones[nombre] = set(df['IDENTIFICACION'].dropna().astype(str))
-                
-                if len(identificaciones) >= 2:
-                    fuentes = list(identificaciones.keys())
-                    for i in range(len(fuentes)):
-                        for j in range(i+1, len(fuentes)):
-                            f1, f2 = fuentes[i], fuentes[j]
-                            comunes = identificaciones[f1] & identificaciones[f2]
-                            solo_f1 = identificaciones[f1] - identificaciones[f2]
-                            solo_f2 = identificaciones[f2] - identificaciones[f1]
-                            
-                            reporte += f"\n{f1} vs {f2}:\n"
-                            reporte += f"  - Pacientes comunes: {len(comunes)}\n"
-                            reporte += f"  - Solo en {f1}: {len(solo_f1)}\n"
-                            reporte += f"  - Solo en {f2}: {len(solo_f2)}\n"
-                
-                st.download_button(
-                    label="📥 Descargar Reporte de Validación",
-                    data=reporte,
-                    file_name=f"reporte_validacion_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-                    mime="text/plain"
-                )
     else:
         st.info("ℹ️ No hay archivos cargados para generar reportes")
 
@@ -926,7 +754,7 @@ with tab5:
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ℹ️ Información de la Aplicación")
 st.sidebar.markdown("""
-**Versión:** 4.0  
+**Versión:** 5.0  
 **Desarrollador:** Willian Almenar  
 **Fecha:** 2024  
 **Propósito:** Validación y análisis de datos de morbilidad
@@ -939,13 +767,13 @@ st.sidebar.markdown("""
 - **EPI15:** Encuesta de Prevalencia Institucional 15
 """)
 
-st.sidebar.markdown("### 🛠️ Funcionalidades de Validación")
+st.sidebar.markdown("### 🛠️ Funcionalidades")
 st.sidebar.markdown("""
 - ✅ Detección de pacientes duplicados  
 - ✅ Comparación entre fuentes  
-- ✅ Identificación de datos omitidos  
-- ✅ Análisis de consistencia  
-- ✅ Exportación de reportes
+- ✅ Verificación de igualdad de pacientes  
+- ✅ Comparación mensual y anual  
+- ✅ Generación de reportes de inconsistencias
 """)
 
 # Contador de archivos cargados
@@ -965,5 +793,5 @@ st.sidebar.markdown("---")
 st.sidebar.markdown("### 📝 Nota")
 st.sidebar.markdown("""
 Este sistema valida la consistencia de los datos entre SISPRO, EPI12 y EPI15,
-identificando pacientes duplicados, omitidos y verificando que los totales coincidan.
+comparando mensual y anualmente los registros para identificar inconsistencias.
 """)
