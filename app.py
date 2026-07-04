@@ -55,7 +55,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="main-header"><h1>🏥 Gestor de Morbilidad - Validación de Datos</h1><p>Willian Almenar</p></div>', unsafe_allow_html=True)
+st.markdown('<div class="main-header"><h1>🏥 Gestor de Morbilidad - Análisis Comparativo</h1><p>Willian Almenar</p></div>', unsafe_allow_html=True)
 st.markdown("---")
 
 # Diccionario de mapeo de columnas esperadas para cada tipo de archivo
@@ -174,12 +174,12 @@ def analizar_archivo(file, tipo_archivo):
         if 'EDAD' in df.columns:
             df['GRUPO_ETARIO'] = df['EDAD'].apply(asignar_grupo_etario)
         
-        # Extraer año y mes para comparaciones temporales
         if 'FECHA_ATENCION' in df.columns:
             try:
                 df['AÑO'] = df['FECHA_ATENCION'].dt.year
                 df['MES'] = df['FECHA_ATENCION'].dt.month
                 df['AÑO_MES'] = df['FECHA_ATENCION'].dt.strftime('%Y-%m')
+                df['MES_NOMBRE'] = df['FECHA_ATENCION'].dt.strftime('%B')
             except:
                 pass
         
@@ -199,8 +199,7 @@ def detectar_duplicados(df):
         duplicados_identificacion = df[df.duplicated(subset=['IDENTIFICACION'], keep=False)]
         duplicados_info['por_identificacion'] = {
             'cantidad': len(duplicados_identificacion),
-            'registros_unicos': duplicados_identificacion['IDENTIFICACION'].nunique(),
-            'ejemplos': duplicados_identificacion[['IDENTIFICACION', 'NOMBRE_COMPLETO']].head(10).to_dict('records')
+            'registros_unicos': duplicados_identificacion['IDENTIFICACION'].nunique()
         }
     
     duplicados_exactos = df[df.duplicated(keep=False)]
@@ -240,6 +239,7 @@ def generar_estadisticas(df, tipo_archivo):
     if 'CODIGO_CIE10' in df.columns:
         try:
             estadisticas["diagnosticos_unicos"] = df['CODIGO_CIE10'].nunique()
+            estadisticas["top_diagnosticos"] = df['CODIGO_CIE10'].value_counts().head(10).to_dict()
         except:
             estadisticas["diagnosticos_unicos"] = 0
     
@@ -249,270 +249,233 @@ def generar_estadisticas(df, tipo_archivo):
         except:
             pass
     
-    if 'EDAD' in df.columns:
-        try:
-            df_edad = df['EDAD'].dropna()
-            if len(df_edad) > 0:
-                estadisticas["edad_promedio"] = round(df_edad.mean(), 2)
-                estadisticas["edad_min"] = df_edad.min()
-                estadisticas["edad_max"] = df_edad.max()
-        except:
-            pass
-    
     if 'GRUPO_ETARIO' in df.columns:
         try:
             estadisticas["distribucion_grupo_etario"] = df['GRUPO_ETARIO'].value_counts().to_dict()
         except:
             pass
     
-    # Estadísticas temporales (mensuales y anuales)
-    if 'AÑO' in df.columns and 'MES' in df.columns:
-        try:
-            # Conteo anual
-            estadisticas["conteo_anual"] = df['AÑO'].value_counts().sort_index().to_dict()
-            
-            # Conteo mensual (agrupado por año y mes)
-            conteo_mensual = df.groupby(['AÑO', 'MES']).size().reset_index(name='conteo')
-            estadisticas["conteo_mensual"] = conteo_mensual.to_dict('records')
-            
-            # Conteo mensual por fuente (para comparación)
-            estadisticas["conteo_por_mes"] = df.groupby(['AÑO', 'MES']).size().to_dict()
-        except:
-            pass
-    
     return estadisticas
 
-def comparar_registros_temporales(dataframes):
-    """Compara los registros mensual y anualmente entre las tres fuentes"""
+def comparar_grupos_etarios_sispro_epi12(df_sispro, df_epi12):
+    """Compara y totaliza pacientes por grupo etario entre SISPRO y EPI12"""
     
-    st.subheader("📊 Comparación Mensual y Anual entre Reportes")
+    st.subheader("📊 Comparativa de Grupos Etarios: SISPRO vs EPI12")
     
-    if len(dataframes) < 2:
-        st.warning("Se necesitan al menos 2 fuentes para comparar")
+    if df_sispro is None or df_epi12 is None:
+        st.warning("Se necesitan los datos de SISPRO y EPI12 para esta comparación")
         return
     
-    # Extraer datos temporales de cada fuente
-    datos_temporales = {}
+    # Preparar datos de grupos etarios
+    grupos_sispro = df_sispro['GRUPO_ETARIO'].value_counts() if 'GRUPO_ETARIO' in df_sispro.columns else pd.Series()
+    grupos_epi12 = df_epi12['GRUPO_ETARIO'].value_counts() if 'GRUPO_ETARIO' in df_epi12.columns else pd.Series()
     
-    for nombre, df in dataframes.items():
-        if 'AÑO' in df.columns and 'MES' in df.columns:
-            # Conteo mensual
-            mensual = df.groupby(['AÑO', 'MES']).size().reset_index(name='conteo')
-            mensual['PERIODO'] = mensual['AÑO'].astype(str) + '-' + mensual['MES'].astype(str).str.zfill(2)
-            
-            # Conteo anual
-            anual = df['AÑO'].value_counts().sort_index().reset_index()
-            anual.columns = ['AÑO', 'conteo']
-            
-            datos_temporales[nombre] = {
-                'mensual': mensual,
-                'anual': anual,
-                'total': len(df)
-            }
+    # Crear DataFrame comparativo
+    todos_grupos = sorted(set(grupos_sispro.index) | set(grupos_epi12.index))
+    todos_grupos = [g for g in todos_grupos if g != 'Sin dato']
     
-    if len(datos_temporales) < 2:
-        st.warning("No se encontraron datos temporales (año/mes) en los reportes")
-        return
+    comparativa_grupos = pd.DataFrame({
+        'Grupo Etario': todos_grupos,
+        'SISPRO': [grupos_sispro.get(g, 0) for g in todos_grupos],
+        'EPI12': [grupos_epi12.get(g, 0) for g in todos_grupos]
+    })
     
-    fuentes = list(datos_temporales.keys())
+    # Calcular totales y diferencias
+    comparativa_grupos['Total'] = comparativa_grupos['SISPRO'] + comparativa_grupos['EPI12']
+    comparativa_grupos['Diferencia'] = comparativa_grupos['SISPRO'] - comparativa_grupos['EPI12']
+    comparativa_grupos['% Diferencia'] = ((comparativa_grupos['Diferencia'].abs() / comparativa_grupos[['SISPRO', 'EPI12']].max(axis=1)) * 100).round(2)
+    comparativa_grupos['% Diferencia'] = comparativa_grupos['% Diferencia'].fillna(0)
     
-    # 1. COMPARACIÓN ANUAL
-    st.write("### 📅 Comparación Anual")
+    # Mostrar tabla
+    st.write("### 📋 Tabla Comparativa por Grupo Etario")
+    st.dataframe(comparativa_grupos, use_container_width=True)
     
-    # Crear tabla comparativa anual
-    anual_comparativa = {}
-    for fuente in fuentes:
-        anual_df = datos_temporales[fuente]['anual']
-        for _, row in anual_df.iterrows():
-            año = int(row['AÑO'])
-            if año not in anual_comparativa:
-                anual_comparativa[año] = {}
-            anual_comparativa[año][fuente] = row['conteo']
+    # Gráfico de barras
+    st.write("### 📊 Gráfico Comparativo")
+    chart_data = comparativa_grupos.set_index('Grupo Etario')[['SISPRO', 'EPI12']]
+    st.bar_chart(chart_data)
     
-    # Completar años faltantes
-    todos_años = sorted(set([año for año in anual_comparativa.keys()]))
-    df_anual = pd.DataFrame(anual_comparativa).T.fillna(0)
-    df_anual.index.name = 'Año'
+    # Resumen de totales
+    st.write("### 📈 Resumen de Totales")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total SISPRO", f"{comparativa_grupos['SISPRO'].sum():,}")
+    with col2:
+        st.metric("Total EPI12", f"{comparativa_grupos['EPI12'].sum():,}")
+    with col3:
+        diff_total = comparativa_grupos['SISPRO'].sum() - comparativa_grupos['EPI12'].sum()
+        st.metric("Diferencia Total", f"{diff_total:+,}", 
+                  delta_color="inverse" if diff_total != 0 else "off")
     
-    st.dataframe(df_anual, use_container_width=True)
+    # Análisis mensual por grupo etario
+    st.write("### 📅 Análisis Mensual por Grupo Etario")
     
-    # Gráfico de barras anual
-    st.bar_chart(df_anual)
-    
-    # Detectar inconsistencias anuales
-    st.write("### ⚠️ Inconsistencias Anuales")
-    
-    inconsistencias_anuales = []
-    for año in df_anual.index:
-        valores = df_anual.loc[año].values
-        if len(set(valores)) > 1:
-            max_val = max(valores)
-            min_val = min(valores)
-            if max_val > 0:
-                diff_pct = ((max_val - min_val) / max_val) * 100
-                inconsistencias_anuales.append({
-                    'Año': año,
-                    'Diferencia': max_val - min_val,
-                    'Porcentaje': f"{diff_pct:.1f}%",
-                    'Detalle': {fuente: int(val) for fuente, val in df_anual.loc[año].items()}
-                })
-    
-    if inconsistencias_anuales:
-        st.markdown('<div class="danger-box">', unsafe_allow_html=True)
-        st.write(f"**⚠️ Se encontraron {len(inconsistencias_anuales)} años con inconsistencias**")
-        
-        for inc in inconsistencias_anuales:
-            st.write(f"**Año {inc['Año']}:** Diferencia de {inc['Diferencia']:,} registros ({inc['Porcentaje']})")
-            for fuente, valor in inc['Detalle'].items():
-                st.write(f"  - {fuente}: {valor:,} registros")
-        st.markdown('</div>', unsafe_allow_html=True)
-    else:
-        st.success("✅ Todos los años tienen la misma cantidad de registros en todas las fuentes")
-    
-    # 2. COMPARACIÓN MENSUAL
-    st.write("### 📆 Comparación Mensual")
-    
-    # Crear tabla comparativa mensual
-    mensual_comparativa = {}
-    for fuente in fuentes:
-        mensual_df = datos_temporales[fuente]['mensual']
-        for _, row in mensual_df.iterrows():
-            periodo = row['PERIODO']
-            if periodo not in mensual_comparativa:
-                mensual_comparativa[periodo] = {}
-            mensual_comparativa[periodo][fuente] = row['conteo']
-    
-    # Completar periodos faltantes
-    todos_periodos = sorted(mensual_comparativa.keys())
-    df_mensual = pd.DataFrame(mensual_comparativa).T.fillna(0)
-    df_mensual.index.name = 'Periodo'
-    
-    # Mostrar solo los primeros 12 periodos para no saturar
-    if len(df_mensual) > 12:
-        st.write(f"Mostrando los últimos 12 meses (total {len(df_mensual)} meses)")
-        df_mensual_mostrar = df_mensual.tail(12)
-    else:
-        df_mensual_mostrar = df_mensual
-    
-    st.dataframe(df_mensual_mostrar, use_container_width=True)
-    
-    # Gráfico de barras mensual
-    st.bar_chart(df_mensual_mostrar)
-    
-    # Detectar inconsistencias mensuales
-    st.write("### ⚠️ Inconsistencias Mensuales")
-    
-    inconsistencias_mensuales = []
-    for periodo in df_mensual.index:
-        valores = df_mensual.loc[periodo].values
-        if len(set(valores)) > 1:
-            max_val = max(valores)
-            min_val = min(valores)
-            if max_val > 0:
-                diff_pct = ((max_val - min_val) / max_val) * 100
-                inconsistencias_mensuales.append({
-                    'Periodo': periodo,
-                    'Diferencia': max_val - min_val,
-                    'Porcentaje': f"{diff_pct:.1f}%",
-                    'Detalle': {fuente: int(val) for fuente, val in df_mensual.loc[periodo].items()}
-                })
-    
-    if inconsistencias_mensuales:
-        st.markdown('<div class="danger-box">', unsafe_allow_html=True)
-        st.write(f"**⚠️ Se encontraron {len(inconsistencias_mensuales)} meses con inconsistencias**")
-        
-        # Mostrar solo los primeros 10 para no saturar
-        for inc in inconsistencias_mensuales[:10]:
-            st.write(f"**{inc['Periodo']}:** Diferencia de {inc['Diferencia']:,} registros ({inc['Porcentaje']})")
-            for fuente, valor in inc['Detalle'].items():
-                st.write(f"  - {fuente}: {valor:,} registros")
-        
-        if len(inconsistencias_mensuales) > 10:
-            st.write(f"... y {len(inconsistencias_mensuales) - 10} meses más con inconsistencias")
-        
-        st.markdown('</div>', unsafe_allow_html=True)
-    else:
-        st.success("✅ Todos los meses tienen la misma cantidad de registros en todas las fuentes")
-    
-    # 3. REPORTE DE INCONSISTENCIAS
-    st.write("### 📋 Reporte de Inconsistencias")
-    
-    if inconsistencias_anuales or inconsistencias_mensuales:
-        reporte = "REPORTE DE INCONSISTENCIAS TEMPORALES\n"
-        reporte += "="*60 + "\n"
-        reporte += f"Fecha de generación: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
-        
-        if inconsistencias_anuales:
-            reporte += "📅 INCONSISTENCIAS ANUALES:\n"
-            reporte += "-"*40 + "\n"
-            for inc in inconsistencias_anuales:
-                reporte += f"\nAño {inc['Año']}:\n"
-                reporte += f"  Diferencia: {inc['Diferencia']} registros ({inc['Porcentaje']})\n"
-                for fuente, valor in inc['Detalle'].items():
-                    reporte += f"  - {fuente}: {valor} registros\n"
-        
-        if inconsistencias_mensuales:
-            reporte += "\n📆 INCONSISTENCIAS MENSUALES (primeros 20):\n"
-            reporte += "-"*40 + "\n"
-            for inc in inconsistencias_mensuales[:20]:
-                reporte += f"\n{inc['Periodo']}:\n"
-                reporte += f"  Diferencia: {inc['Diferencia']} registros ({inc['Porcentaje']})\n"
-                for fuente, valor in inc['Detalle'].items():
-                    reporte += f"  - {fuente}: {valor} registros\n"
-        
-        st.download_button(
-            label="📥 Descargar Reporte de Inconsistencias",
-            data=reporte,
-            file_name=f"reporte_inconsistencias_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-            mime="text/plain"
+    if 'AÑO_MES' in df_sispro.columns and 'AÑO_MES' in df_epi12.columns:
+        # Seleccionar grupo etario para análisis mensual
+        grupo_seleccionado = st.selectbox(
+            "Seleccionar grupo etario para análisis mensual:",
+            todos_grupos
         )
-    else:
-        st.success("🎉 ¡No se encontraron inconsistencias! Todos los reportes coinciden mensual y anualmente.")
+        
+        if grupo_seleccionado:
+            # Filtrar por grupo etario
+            df_sispro_grupo = df_sispro[df_sispro['GRUPO_ETARIO'] == grupo_seleccionado]
+            df_epi12_grupo = df_epi12[df_epi12['GRUPO_ETARIO'] == grupo_seleccionado]
+            
+            # Conteo mensual
+            mensual_sispro = df_sispro_grupo.groupby('AÑO_MES').size().reset_index(name='SISPRO')
+            mensual_epi12 = df_epi12_grupo.groupby('AÑO_MES').size().reset_index(name='EPI12')
+            
+            # Unir datos
+            mensual_comparativa = pd.merge(mensual_sispro, mensual_epi12, on='AÑO_MES', how='outer').fillna(0)
+            mensual_comparativa = mensual_comparativa.sort_values('AÑO_MES')
+            
+            # Mostrar datos mensuales
+            st.write(f"**Análisis mensual para grupo {grupo_seleccionado}**")
+            st.dataframe(mensual_comparativa, use_container_width=True)
+            
+            # Gráfico mensual
+            if len(mensual_comparativa) > 0:
+                chart_mensual = mensual_comparativa.set_index('AÑO_MES')[['SISPRO', 'EPI12']]
+                st.bar_chart(chart_mensual)
+    
+    # Análisis anual por grupo etario
+    st.write("### 📅 Análisis Anual por Grupo Etario")
+    
+    if 'AÑO' in df_sispro.columns and 'AÑO' in df_epi12.columns:
+        # Seleccionar grupo etario para análisis anual
+        grupo_anual = st.selectbox(
+            "Seleccionar grupo etario para análisis anual:",
+            todos_grupos,
+            key="grupo_anual"
+        )
+        
+        if grupo_anual:
+            df_sispro_grupo = df_sispro[df_sispro['GRUPO_ETARIO'] == grupo_anual]
+            df_epi12_grupo = df_epi12[df_epi12['GRUPO_ETARIO'] == grupo_anual]
+            
+            anual_sispro = df_sispro_grupo.groupby('AÑO').size().reset_index(name='SISPRO')
+            anual_epi12 = df_epi12_grupo.groupby('AÑO').size().reset_index(name='EPI12')
+            
+            anual_comparativa = pd.merge(anual_sispro, anual_epi12, on='AÑO', how='outer').fillna(0)
+            anual_comparativa = anual_comparativa.sort_values('AÑO')
+            
+            st.write(f"**Análisis anual para grupo {grupo_anual}**")
+            st.dataframe(anual_comparativa, use_container_width=True)
+            
+            if len(anual_comparativa) > 0:
+                chart_anual = anual_comparativa.set_index('AÑO')[['SISPRO', 'EPI12']]
+                st.bar_chart(chart_anual)
 
-def verificar_igualdad_pacientes(dataframes):
-    """Verifica específicamente si la cantidad de pacientes es igual en los tres reportes"""
+def comparar_enfermedades_epi15_sispro(df_epi15, df_sispro):
+    """Compara y totaliza datos por enfermedades entre EPI15 y SISPRO"""
     
-    st.subheader("✅ Verificación de Igualdad de Pacientes")
+    st.subheader("🔍 Comparativa de Enfermedades: EPI15 vs SISPRO")
     
-    if len(dataframes) < 3:
-        st.warning("Se necesitan los 3 reportes para verificar igualdad")
+    if df_epi15 is None or df_sispro is None:
+        st.warning("Se necesitan los datos de EPI15 y SISPRO para esta comparación")
         return
     
-    pacientes_por_fuente = {}
-    for nombre, df in dataframes.items():
-        if 'IDENTIFICACION' in df.columns:
-            pacientes_por_fuente[nombre] = df['IDENTIFICACION'].nunique()
+    if 'CODIGO_CIE10' not in df_epi15.columns or 'CODIGO_CIE10' not in df_sispro.columns:
+        st.warning("No se encontró la columna CODIGO_CIE10 en los archivos")
+        return
     
-    if len(pacientes_por_fuente) == 3:
-        col1, col2, col3 = st.columns(3)
+    # Top enfermedades por cada fuente
+    top_epi15 = df_epi15['CODIGO_CIE10'].value_counts().head(20)
+    top_sispro = df_sispro['CODIGO_CIE10'].value_counts().head(20)
+    
+    # Crear DataFrame comparativo
+    todos_codigos = sorted(set(top_epi15.index) | set(top_sispro.index))
+    
+    comparativa_enfermedades = pd.DataFrame({
+        'Código CIE10': todos_codigos,
+        'EPI15': [top_epi15.get(c, 0) for c in todos_codigos],
+        'SISPRO': [top_sispro.get(c, 0) for c in todos_codigos]
+    })
+    
+    comparativa_enfermedades['Total'] = comparativa_enfermedades['EPI15'] + comparativa_enfermedades['SISPRO']
+    comparativa_enfermedades['Diferencia'] = comparativa_enfermedades['EPI15'] - comparativa_enfermedades['SISPRO']
+    comparativa_enfermedades['% Diferencia'] = ((comparativa_enfermedades['Diferencia'].abs() / comparativa_enfermedades[['EPI15', 'SISPRO']].max(axis=1)) * 100).round(2)
+    comparativa_enfermedades['% Diferencia'] = comparativa_enfermedades['% Diferencia'].fillna(0)
+    
+    # Ordenar por total
+    comparativa_enfermedades = comparativa_enfermedades.sort_values('Total', ascending=False)
+    
+    # Mostrar tabla
+    st.write("### 📋 Tabla Comparativa de Enfermedades (Top 20)")
+    st.dataframe(comparativa_enfermedades, use_container_width=True)
+    
+    # Gráfico de barras
+    st.write("### 📊 Gráfico Comparativo de Enfermedades")
+    chart_enfermedades = comparativa_enfermedades.set_index('Código CIE10').head(10)[['EPI15', 'SISPRO']]
+    st.bar_chart(chart_enfermedades)
+    
+    # Resumen de totales
+    st.write("### 📈 Resumen de Totales por Enfermedad")
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total EPI15", f"{comparativa_enfermedades['EPI15'].sum():,}")
+    with col2:
+        st.metric("Total SISPRO", f"{comparativa_enfermedades['SISPRO'].sum():,}")
+    with col3:
+        diff_enfermedades = comparativa_enfermedades['EPI15'].sum() - comparativa_enfermedades['SISPRO'].sum()
+        st.metric("Diferencia Total", f"{diff_enfermedades:+,}")
+    
+    # Enfermedades exclusivas
+    st.write("### 🔍 Enfermedades Exclusivas")
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        exclusivas_epi15 = comparativa_enfermedades[comparativa_enfermedades['SISPRO'] == 0]
+        st.write(f"**Enfermedades solo en EPI15:** {len(exclusivas_epi15)}")
+        if len(exclusivas_epi15) > 0:
+            st.dataframe(exclusivas_epi15[['Código CIE10', 'EPI15']].head(10), use_container_width=True)
+    
+    with col2:
+        exclusivas_sispro = comparativa_enfermedades[comparativa_enfermedades['EPI15'] == 0]
+        st.write(f"**Enfermedades solo en SISPRO:** {len(exclusivas_sispro)}")
+        if len(exclusivas_sispro) > 0:
+            st.dataframe(exclusivas_sispro[['Código CIE10', 'SISPRO']].head(10), use_container_width=True)
+    
+    # Enfermedades comunes
+    comunes = comparativa_enfermedades[(comparativa_enfermedades['EPI15'] > 0) & (comparativa_enfermedades['SISPRO'] > 0)]
+    st.write(f"### 📊 Enfermedades Comunes: {len(comunes)}")
+    
+    if len(comunes) > 0:
+        st.dataframe(comunes.head(10), use_container_width=True)
         
-        with col1:
-            st.metric("SISPRO", f"{pacientes_por_fuente.get('SISPRO', 0):,}")
-        with col2:
-            st.metric("EPI12", f"{pacientes_por_fuente.get('EPI12', 0):,}")
-        with col3:
-            st.metric("EPI15", f"{pacientes_por_fuente.get('EPI15', 0):,}")
+        # Gráfico de enfermedades comunes
+        st.write("**Top 10 Enfermedades Comunes**")
+        chart_comunes = comunes.set_index('Código CIE10').head(10)[['EPI15', 'SISPRO']]
+        st.bar_chart(chart_comunes)
+    
+    # Análisis mensual de enfermedades
+    st.write("### 📅 Análisis Mensual de Enfermedades")
+    
+    if 'AÑO_MES' in df_epi15.columns and 'AÑO_MES' in df_sispro.columns:
+        # Seleccionar enfermedad para análisis mensual
+        codigos_disponibles = todos_codigos[:20]  # Top 20 para no saturar
+        codigo_seleccionado = st.selectbox(
+            "Seleccionar enfermedad (código CIE10) para análisis mensual:",
+            codigos_disponibles
+        )
         
-        valores = list(pacientes_por_fuente.values())
-        if len(set(valores)) == 1:
-            st.success("🎉 ¡TODOS LOS REPORTES TIENEN LA MISMA CANTIDAD DE PACIENTES!")
-            st.balloons()
-        else:
-            st.warning("⚠️ Los reportes tienen DIFERENTE cantidad de pacientes")
+        if codigo_seleccionado:
+            df_epi15_enfermedad = df_epi15[df_epi15['CODIGO_CIE10'] == codigo_seleccionado]
+            df_sispro_enfermedad = df_sispro[df_sispro['CODIGO_CIE10'] == codigo_seleccionado]
             
-            # Mostrar diferencias detalladas
-            max_pac = max(valores)
-            min_pac = min(valores)
+            mensual_epi15 = df_epi15_enfermedad.groupby('AÑO_MES').size().reset_index(name='EPI15')
+            mensual_sispro = df_sispro_enfermedad.groupby('AÑO_MES').size().reset_index(name='SISPRO')
             
-            st.write(f"**Diferencia máxima:** {max_pac - min_pac:,} pacientes")
-            st.write(f"**Porcentaje de diferencia:** {((max_pac - min_pac) / max_pac) * 100:.2f}%")
+            mensual_enfermedad = pd.merge(mensual_epi15, mensual_sispro, on='AÑO_MES', how='outer').fillna(0)
+            mensual_enfermedad = mensual_enfermedad.sort_values('AÑO_MES')
             
-            # Identificar qué fuente tiene más/menos
-            for nombre, cantidad in pacientes_por_fuente.items():
-                if cantidad == max_pac:
-                    st.info(f"📈 **{nombre}** tiene la mayor cantidad: {cantidad:,} pacientes")
-                elif cantidad == min_pac:
-                    st.warning(f"📉 **{nombre}** tiene la menor cantidad: {cantidad:,} pacientes")
+            st.write(f"**Análisis mensual para enfermedad {codigo_seleccionado}**")
+            st.dataframe(mensual_enfermedad, use_container_width=True)
+            
+            if len(mensual_enfermedad) > 0:
+                chart_mensual_enfermedad = mensual_enfermedad.set_index('AÑO_MES')[['EPI15', 'SISPRO']]
+                st.bar_chart(chart_mensual_enfermedad)
 
 def mostrar_analisis(df, info, tipo_archivo):
     """Muestra el análisis detallado del archivo"""
@@ -540,7 +503,6 @@ def mostrar_analisis(df, info, tipo_archivo):
             st.write(f"**Diagnósticos únicos:** {estadisticas.get('diagnosticos_unicos', 'N/A')}")
             if 'edad_promedio' in estadisticas:
                 st.write(f"**Edad promedio:** {estadisticas['edad_promedio']} años")
-                st.write(f"**Rango de edad:** {estadisticas.get('edad_min', 'N/A')} - {estadisticas.get('edad_max', 'N/A')} años")
 
 # Inicializar session_state
 if 'dataframes' not in st.session_state:
@@ -549,11 +511,12 @@ if 'infos' not in st.session_state:
     st.session_state.infos = {}
 
 # Interfaz principal
-tab1, tab2, tab3, tab4, tab5 = st.tabs([
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📤 Carga de Archivos", 
-    "📊 Análisis por Fuente", 
+    "📊 Análisis por Fuente",
+    "👥 Grupos Etarios SISPRO vs EPI12",
+    "🔬 Enfermedades EPI15 vs SISPRO",
     "🔍 Validación de Consistencia",
-    "📈 Grupos Etarios y Enfermedades",
     "📋 Reporte Consolidado"
 ])
 
@@ -562,7 +525,6 @@ with tab1:
     st.markdown("""
     <div class="info-box">
     💡 <b>Instrucciones:</b> Sube los archivos Excel (.xls o .xlsx) correspondientes a cada tipo de formato.
-    La aplicación validará automáticamente las columnas, detectará duplicados y generará estadísticas.
     </div>
     """, unsafe_allow_html=True)
     
@@ -642,64 +604,36 @@ with tab2:
         st.info("ℹ️ No hay archivos cargados. Por favor, carga archivos en la pestaña 'Carga de Archivos'")
 
 with tab3:
+    st.header("👥 Comparativa de Grupos Etarios: SISPRO vs EPI12")
+    
+    if 'SISPRO' in st.session_state.dataframes and 'EPI12' in st.session_state.dataframes:
+        df_sispro = st.session_state.dataframes['SISPRO']
+        df_epi12 = st.session_state.dataframes['EPI12']
+        comparar_grupos_etarios_sispro_epi12(df_sispro, df_epi12)
+    else:
+        st.warning("⚠️ Se necesitan los archivos SISPRO y EPI12 para esta comparación")
+        st.info("Por favor, carga ambos archivos en la pestaña 'Carga de Archivos'")
+
+with tab4:
+    st.header("🔬 Comparativa de Enfermedades: EPI15 vs SISPRO")
+    
+    if 'EPI15' in st.session_state.dataframes and 'SISPRO' in st.session_state.dataframes:
+        df_epi15 = st.session_state.dataframes['EPI15']
+        df_sispro = st.session_state.dataframes['SISPRO']
+        comparar_enfermedades_epi15_sispro(df_epi15, df_sispro)
+    else:
+        st.warning("⚠️ Se necesitan los archivos EPI15 y SISPRO para esta comparación")
+        st.info("Por favor, carga ambos archivos en la pestaña 'Carga de Archivos'")
+
+with tab5:
     st.header("🔍 Validación de Consistencia de Datos")
     
     if st.session_state.dataframes:
-        # Verificar igualdad de pacientes
-        verificar_igualdad_pacientes(st.session_state.dataframes)
-        
-        st.markdown("---")
-        
-        # Comparar registros temporales (mensual y anual)
-        comparar_registros_temporales(st.session_state.dataframes)
+        st.info("🔍 Módulo de validación de consistencia en desarrollo")
     else:
         st.info("ℹ️ No hay archivos cargados para validar")
 
-with tab4:
-    st.header("📈 Análisis por Grupos Etarios y Enfermedades")
-    
-    if st.session_state.dataframes:
-        # Mostrar comparativa de grupos etarios
-        st.subheader("📊 Comparativa por Grupo Etario")
-        
-        comparativa_data = []
-        for nombre, df in st.session_state.dataframes.items():
-            if 'GRUPO_ETARIO' in df.columns:
-                distribucion = df['GRUPO_ETARIO'].value_counts()
-                for grupo, count in distribucion.items():
-                    if grupo != 'Sin dato':
-                        comparativa_data.append({
-                            'Fuente': nombre,
-                            'Grupo Etario': grupo,
-                            'Cantidad': count
-                        })
-        
-        if comparativa_data:
-            comparativa_df = pd.DataFrame(comparativa_data)
-            pivot_df = comparativa_df.pivot(index='Grupo Etario', columns='Fuente', values='Cantidad').fillna(0)
-            st.dataframe(pivot_df, use_container_width=True)
-            st.bar_chart(pivot_df)
-        else:
-            st.warning("No se encontraron datos de grupos etarios")
-        
-        st.markdown("---")
-        
-        # Mostrar comparativa de enfermedades
-        st.subheader("🔍 Comparativa de Enfermedades por Fuente")
-        
-        for nombre, df in st.session_state.dataframes.items():
-            if 'CODIGO_CIE10' in df.columns:
-                st.write(f"**{nombre}** - Top 10 Diagnósticos")
-                top = df['CODIGO_CIE10'].value_counts().head(10)
-                col1, col2 = st.columns(2)
-                with col1:
-                    st.dataframe(top, use_container_width=True)
-                with col2:
-                    st.bar_chart(top)
-    else:
-        st.info("ℹ️ No hay archivos cargados para analizar")
-
-with tab5:
+with tab6:
     st.header("📋 Reporte Consolidado")
     
     if st.session_state.dataframes:
@@ -714,8 +648,7 @@ with tab5:
                 'Fuente': nombre,
                 'Registros': len(df),
                 'Pacientes Únicos': estadisticas.get('pacientes_unicos', 'N/A'),
-                'Diagnósticos Únicos': estadisticas.get('diagnosticos_unicos', 'N/A'),
-                'Edad Promedio': estadisticas.get('edad_promedio', 'N/A')
+                'Diagnósticos Únicos': estadisticas.get('diagnosticos_unicos', 'N/A')
             })
         
         st.dataframe(pd.DataFrame(resumen_consolidado), use_container_width=True)
@@ -723,30 +656,23 @@ with tab5:
         # Opciones de exportación
         st.subheader("💾 Exportar Reportes")
         
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            if st.button("📥 Exportar Datos Consolidados a Excel"):
-                try:
-                    from io import BytesIO
-                    output = BytesIO()
-                    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                        for nombre, df in st.session_state.dataframes.items():
-                            df.to_excel(writer, sheet_name=nombre[:31], index=False)
-                        
-                        resumen_df = pd.DataFrame(resumen_consolidado)
-                        resumen_df.to_excel(writer, sheet_name='Resumen', index=False)
-                    
-                    output.seek(0)
-                    st.download_button(
-                        label="Descargar Excel",
-                        data=output,
-                        file_name=f"reporte_consolidado_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                    )
-                    st.success("Reporte exportado exitosamente!")
-                except Exception as e:
-                    st.error(f"Error al exportar: {str(e)}")
+        if st.button("📥 Exportar Datos Consolidados a Excel"):
+            try:
+                from io import BytesIO
+                output = BytesIO()
+                with pd.ExcelWriter(output, engine='openpyxl') as writer:
+                    for nombre, df in st.session_state.dataframes.items():
+                        df.to_excel(writer, sheet_name=nombre[:31], index=False)
+                output.seek(0)
+                st.download_button(
+                    label="Descargar Excel",
+                    data=output,
+                    file_name=f"reporte_consolidado_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                )
+                st.success("Reporte exportado exitosamente!")
+            except Exception as e:
+                st.error(f"Error al exportar: {str(e)}")
     else:
         st.info("ℹ️ No hay archivos cargados para generar reportes")
 
@@ -754,26 +680,17 @@ with tab5:
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ℹ️ Información de la Aplicación")
 st.sidebar.markdown("""
-**Versión:** 5.0  
+**Versión:** 6.0  
 **Desarrollador:** Willian Almenar  
 **Fecha:** 2024  
-**Propósito:** Validación y análisis de datos de morbilidad
+**Propósito:** Análisis comparativo de datos de morbilidad
 """)
 
-st.sidebar.markdown("### 📚 Formatos Soportados")
+st.sidebar.markdown("### 📚 Comparaciones Disponibles")
 st.sidebar.markdown("""
-- **SISPRO:** Sistema de Información de Protección Social  
-- **EPI12:** Encuesta de Prevalencia Institucional 12  
-- **EPI15:** Encuesta de Prevalencia Institucional 15
-""")
-
-st.sidebar.markdown("### 🛠️ Funcionalidades")
-st.sidebar.markdown("""
-- ✅ Detección de pacientes duplicados  
-- ✅ Comparación entre fuentes  
-- ✅ Verificación de igualdad de pacientes  
-- ✅ Comparación mensual y anual  
-- ✅ Generación de reportes de inconsistencias
+- **SISPRO vs EPI12:** Grupos etarios  
+- **EPI15 vs SISPRO:** Enfermedades  
+- **Análisis mensual y anual**
 """)
 
 # Contador de archivos cargados
@@ -788,10 +705,3 @@ if st.sidebar.button("🔄 Limpiar todos los datos"):
     st.session_state.infos = {}
     st.sidebar.success("Datos limpiados exitosamente!")
     st.rerun()
-
-st.sidebar.markdown("---")
-st.sidebar.markdown("### 📝 Nota")
-st.sidebar.markdown("""
-Este sistema valida la consistencia de los datos entre SISPRO, EPI12 y EPI15,
-comparando mensual y anualmente los registros para identificar inconsistencias.
-""")
