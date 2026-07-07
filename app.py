@@ -3,11 +3,6 @@ import pandas as pd
 import numpy as np
 from datetime import datetime
 from io import BytesIO
-import docx
-from docx import Document
-from docx.shared import Inches, Pt, RGBColor
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.table import WD_TABLE_ALIGNMENT
 
 st.set_page_config(page_title="Gestor de Morbilidad - Willian Almenar", layout="wide")
 
@@ -302,7 +297,7 @@ def identificar_discrepancias_detalladas(dataframes, año_inicio, mes_inicio, a�
         diff_epi12 = pacientes_epi12 - pacientes_sispro
         diff_epi15 = total_epi15 - pacientes_sispro
         
-        # Identificar grupos etarios faltantes en EPI12 (solo si hay diferencia)
+        # Identificar grupos etarios faltantes en EPI12
         grupos_faltantes_epi12 = []
         if diff_epi12 != 0:
             for grupo in GRUPOS_ETARIOS.keys():
@@ -322,14 +317,10 @@ def identificar_discrepancias_detalladas(dataframes, año_inicio, mes_inicio, a�
             
             # Si no coinciden, ajustar agregando un grupo "Otros" para balancear
             if suma_diferencias != diff_epi12:
-                # Buscar el grupo con mayor diferencia para ajustar
                 if grupos_faltantes_epi12:
-                    # Ordenar por diferencia absoluta
                     grupos_faltantes_epi12.sort(key=lambda x: abs(x['diferencia']), reverse=True)
-                    # Ajustar el primer grupo
                     ajuste = diff_epi12 - suma_diferencias
                     grupos_faltantes_epi12[0]['diferencia'] += ajuste
-                    # Recalcular epi12 para ese grupo
                     grupos_faltantes_epi12[0]['epi12'] = grupos_faltantes_epi12[0]['sispro'] - grupos_faltantes_epi12[0]['diferencia']
         
         # Identificar enfermedades faltantes en EPI15
@@ -351,157 +342,203 @@ def identificar_discrepancias_detalladas(dataframes, año_inicio, mes_inicio, a�
     
     return discrepancias
 
-def generar_reporte_word(dataframes, año_inicio, mes_inicio, año_fin, mes_fin, tipo_reporte='mensual'):
-    """Genera un reporte en formato Word con las discrepancias encontradas"""
+def generar_reporte_html(dataframes, año_inicio, mes_inicio, año_fin, mes_fin, tipo_reporte='mensual'):
+    """Genera un reporte en formato HTML con las discrepancias encontradas"""
     
-    doc = Document()
-    
-    # Título
-    titulo = doc.add_heading(f'REPORTE DE DISCREPANCIAS - {"MENSUAL" if tipo_reporte == "mensual" else "ANUAL"}', 0)
-    titulo.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    
-    # Información del período
-    doc.add_paragraph(f'Período analizado: {mes_inicio:02d}/{año_inicio} al {mes_fin:02d}/{año_fin}')
-    doc.add_paragraph(f'Fecha de generación: {datetime.now().strftime("%d/%m/%Y %H:%M")}')
-    doc.add_paragraph('')
-    
-    # Obtener discrepancias
     discrepancias = identificar_discrepancias_detalladas(dataframes, año_inicio, mes_inicio, año_fin, mes_fin)
     
+    html = f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <title>Reporte de Discrepancias - {tipo_reporte.upper()}</title>
+        <style>
+            body {{ font-family: Arial, sans-serif; margin: 40px; }}
+            h1 {{ color: #1E3A5F; text-align: center; border-bottom: 3px solid #1E3A5F; padding-bottom: 10px; }}
+            h2 {{ color: #2c3e50; margin-top: 30px; }}
+            h3 {{ color: #34495e; margin-top: 20px; }}
+            table {{ border-collapse: collapse; width: 100%; margin: 15px 0; }}
+            th, td {{ border: 1px solid #ddd; padding: 8px; text-align: center; }}
+            th {{ background-color: #1E3A5F; color: white; }}
+            tr:nth-child(even) {{ background-color: #f2f2f2; }}
+            .header-info {{ text-align: center; margin-bottom: 30px; }}
+            .discrepancy {{ background-color: #fff3e0; border-left: 5px solid #ff9800; padding: 10px; margin: 15px 0; }}
+            .success {{ background-color: #d4edda; border-left: 5px solid #28a745; padding: 10px; margin: 15px 0; }}
+            .footer {{ text-align: center; margin-top: 40px; font-size: 12px; color: #666; border-top: 1px solid #ddd; padding-top: 20px; }}
+            .grupo-faltante {{ background-color: #fce4ec; }}
+            .enfermedad-faltante {{ background-color: #f3e5f5; }}
+        </style>
+    </head>
+    <body>
+        <h1>🏥 REPORTE DE DISCREPANCIAS - {tipo_reporte.upper()}</h1>
+        <div class="header-info">
+            <p><strong>Período analizado:</strong> {mes_inicio:02d}/{año_inicio} al {mes_fin:02d}/{año_fin}</p>
+            <p><strong>Fecha de generación:</strong> {datetime.now().strftime("%d/%m/%Y %H:%M")}</p>
+            <p><strong>SISPRO es la referencia (Total Real)</strong></p>
+        </div>
+    """
+    
     if not discrepancias:
-        doc.add_paragraph('✅ No se encontraron discrepancias en el período analizado.')
-        return doc
-    
-    # Resumen ejecutivo
-    doc.add_heading('RESUMEN EJECUTIVO', level=1)
-    
-    total_meses = len(discrepancias)
-    meses_epi12 = sum(1 for d in discrepancias if d['diff_epi12'] != 0)
-    meses_epi15 = sum(1 for d in discrepancias if d['diff_epi15'] != 0)
-    
-    doc.add_paragraph(f'Total de meses con discrepancias: {total_meses}')
-    doc.add_paragraph(f'Meses con discrepancias en EPI12: {meses_epi12}')
-    doc.add_paragraph(f'Meses con discrepancias en EPI15: {meses_epi15}')
-    doc.add_paragraph('')
-    
-    # Análisis detallado por mes
-    doc.add_heading('ANÁLISIS DETALLADO POR MES', level=1)
-    
-    for disc in discrepancias:
-        mes = disc['mes']
-        doc.add_heading(f'Mes: {mes}', level=2)
+        html += """
+        <div class="success">
+            <h3>✅ No se encontraron discrepancias en el período analizado.</h3>
+            <p>Todos los reportes coinciden con SISPRO.</p>
+        </div>
+        """
+    else:
+        # Resumen ejecutivo
+        total_meses = len(discrepancias)
+        meses_epi12 = sum(1 for d in discrepancias if d['diff_epi12'] != 0)
+        meses_epi15 = sum(1 for d in discrepancias if d['diff_epi15'] != 0)
         
-        # Tabla de totales
-        doc.add_paragraph('Totales:')
-        tabla = doc.add_table(rows=1, cols=4)
-        tabla.style = 'Table Grid'
+        html += f"""
+        <h2>📊 RESUMEN EJECUTIVO</h2>
+        <table>
+            <tr>
+                <th>Métrica</th>
+                <th>Valor</th>
+            </tr>
+            <tr>
+                <td>Total de meses con discrepancias</td>
+                <td><strong>{total_meses}</strong></td>
+            </tr>
+            <tr>
+                <td>Meses con discrepancias en EPI12</td>
+                <td><strong>{meses_epi12}</strong></td>
+            </tr>
+            <tr>
+                <td>Meses con discrepancias en EPI15</td>
+                <td><strong>{meses_epi15}</strong></td>
+            </tr>
+        </table>
+        """
         
-        # Encabezados
-        hdr_cells = tabla.rows[0].cells
-        hdr_cells[0].text = 'Fuente'
-        hdr_cells[1].text = 'Total'
-        hdr_cells[2].text = 'Diferencia vs SISPRO'
-        hdr_cells[3].text = 'Estado'
+        # Análisis detallado por mes
+        html += "<h2>📋 ANÁLISIS DETALLADO POR MES</h2>"
         
-        # Datos SISPRO
-        row = tabla.add_row().cells
-        row[0].text = 'SISPRO (Referencia)'
-        row[1].text = str(disc['sispro'])
-        row[2].text = '-'
-        row[3].text = '✅ OK'
-        
-        # Datos EPI12
-        row = tabla.add_row().cells
-        row[0].text = 'EPI12'
-        row[1].text = str(disc['epi12'])
-        row[2].text = f"{disc['diff_epi12']:+d}"
-        row[3].text = '✅ OK' if disc['diff_epi12'] == 0 else '⚠️ DISCREPANCIA'
-        
-        # Datos EPI15
-        row = tabla.add_row().cells
-        row[0].text = 'EPI15'
-        row[1].text = str(disc['epi15'])
-        row[2].text = f"{disc['diff_epi15']:+d}"
-        row[3].text = '✅ OK' if disc['diff_epi15'] == 0 else '⚠️ DISCREPANCIA'
-        
-        # Grupos etarios faltantes en EPI12
-        if disc['diff_epi12'] != 0 and disc['grupos_faltantes_epi12']:
-            doc.add_paragraph('')
-            doc.add_paragraph('🔴 Grupos etarios con diferencias en EPI12:')
-            
-            tabla_grupos = doc.add_table(rows=1, cols=4)
-            tabla_grupos.style = 'Table Grid'
-            
-            hdr_cells = tabla_grupos.rows[0].cells
-            hdr_cells[0].text = 'Grupo Etario'
-            hdr_cells[1].text = 'SISPRO'
-            hdr_cells[2].text = 'EPI12'
-            hdr_cells[3].text = 'Diferencia'
-            
-            for grupo in disc['grupos_faltantes_epi12']:
-                if grupo['diferencia'] != 0:
-                    row = tabla_grupos.add_row().cells
-                    row[0].text = grupo['grupo']
-                    row[1].text = str(grupo['sispro'])
-                    row[2].text = str(grupo['epi12'])
-                    row[3].text = f"{grupo['diferencia']:+d}"
-            
-            # Verificar que la suma de diferencias coincida
-            suma_grupos = sum(g['diferencia'] for g in disc['grupos_faltantes_epi12'])
-            doc.add_paragraph(f'✅ Verificación: Suma de diferencias por grupo etario = {suma_grupos:+d} (coincide con diferencia total de {disc["diff_epi12"]:+d})')
-        
-        # Enfermedades faltantes en EPI15
-        if disc['diff_epi15'] != 0 and disc['enfermedades_faltantes_epi15']:
-            doc.add_paragraph('')
-            doc.add_paragraph('🔴 Enfermedades no reportadas en EPI15:')
-            
-            for i, enfermedad in enumerate(disc['enfermedades_faltantes_epi15'][:10], 1):
-                doc.add_paragraph(f'  {i}. {enfermedad}', style='List Bullet')
-            
-            if len(disc['enfermedades_faltantes_epi15']) > 10:
-                doc.add_paragraph(f'  ... y {len(disc["enfermedades_faltantes_epi15"]) - 10} enfermedades más')
-        
-        doc.add_paragraph('')
-    
-    # Conclusiones y recomendaciones
-    doc.add_heading('CONCLUSIONES Y RECOMENDACIONES', level=1)
-    
-    total_diff_epi12 = sum(d['diff_epi12'] for d in discrepancias)
-    total_diff_epi15 = sum(d['diff_epi15'] for d in discrepancias)
-    
-    if total_diff_epi12 != 0:
-        doc.add_paragraph(f'📌 EPI12: Debe {"agregar" if total_diff_epi12 < 0 else "eliminar"} {abs(total_diff_epi12)} registros para coincidir con SISPRO.')
-        
-        # Detallar por grupo etario
-        doc.add_paragraph('  Detalle por grupo etario:')
         for disc in discrepancias:
+            mes = disc['mes']
+            html += f"""
+            <div class="discrepancy">
+                <h3>📅 Mes: {mes}</h3>
+                <table>
+                    <tr>
+                        <th>Fuente</th>
+                        <th>Total</th>
+                        <th>Diferencia vs SISPRO</th>
+                        <th>Estado</th>
+                    </tr>
+                    <tr>
+                        <td><strong>SISPRO (Referencia)</strong></td>
+                        <td>{disc['sispro']}</td>
+                        <td>-</td>
+                        <td>✅ OK</td>
+                    </tr>
+                    <tr>
+                        <td><strong>EPI12</strong></td>
+                        <td>{disc['epi12']}</td>
+                        <td>{disc['diff_epi12']:+d}</td>
+                        <td>{"✅ OK" if disc['diff_epi12'] == 0 else "⚠️ DISCREPANCIA"}</td>
+                    </tr>
+                    <tr>
+                        <td><strong>EPI15</strong></td>
+                        <td>{disc['epi15']}</td>
+                        <td>{disc['diff_epi15']:+d}</td>
+                        <td>{"✅ OK" if disc['diff_epi15'] == 0 else "⚠️ DISCREPANCIA"}</td>
+                    </tr>
+                </table>
+            """
+            
+            # Grupos etarios con diferencias en EPI12
             if disc['diff_epi12'] != 0 and disc['grupos_faltantes_epi12']:
+                html += """
+                <h4>🔴 Grupos etarios con diferencias en EPI12:</h4>
+                <table>
+                    <tr>
+                        <th>Grupo Etario</th>
+                        <th>SISPRO</th>
+                        <th>EPI12</th>
+                        <th>Diferencia</th>
+                    </tr>
+                """
+                suma_grupos = 0
                 for grupo in disc['grupos_faltantes_epi12']:
                     if grupo['diferencia'] != 0:
-                        doc.add_paragraph(f'    - {disc["mes"]}: {grupo["grupo"]} → {abs(grupo["diferencia"])} registros')
-    else:
-        doc.add_paragraph('📌 EPI12: ✅ Ya está alineado con SISPRO.')
-    
-    if total_diff_epi15 != 0:
-        doc.add_paragraph(f'📌 EPI15: Debe {"agregar" if total_diff_epi15 < 0 else "eliminar"} {abs(total_diff_epi15)} registros para coincidir con SISPRO.')
-        
-        # Detallar enfermedades faltantes
-        doc.add_paragraph('  Detalle de enfermedades faltantes:')
-        for disc in discrepancias:
+                        html += f"""
+                        <tr>
+                            <td>{grupo['grupo']}</td>
+                            <td>{grupo['sispro']}</td>
+                            <td>{grupo['epi12']}</td>
+                            <td>{grupo['diferencia']:+d}</td>
+                        </tr>
+                        """
+                        suma_grupos += grupo['diferencia']
+                html += f"""
+                </table>
+                <p>✅ Verificación: Suma de diferencias = {suma_grupos:+d} (coincide con diferencia total de {disc['diff_epi12']:+d})</p>
+                """
+            
+            # Enfermedades no reportadas en EPI15
             if disc['diff_epi15'] != 0 and disc['enfermedades_faltantes_epi15']:
-                for enf in disc['enfermedades_faltantes_epi15'][:5]:
-                    doc.add_paragraph(f'    - {disc["mes"]}: {enf}')
-                if len(disc['enfermedades_faltantes_epi15']) > 5:
-                    doc.add_paragraph(f'    - ... y {len(disc["enfermedades_faltantes_epi15"]) - 5} más')
-    else:
-        doc.add_paragraph('📌 EPI15: ✅ Ya está alineado con SISPRO.')
+                html += """
+                <h4>🔴 Enfermedades no reportadas en EPI15:</h4>
+                <ul>
+                """
+                for enf in disc['enfermedades_faltantes_epi15'][:10]:
+                    html += f"<li>{enf}</li>"
+                if len(disc['enfermedades_faltantes_epi15']) > 10:
+                    html += f"<li>... y {len(disc['enfermedades_faltantes_epi15']) - 10} enfermedades más</li>"
+                html += "</ul>"
+            
+            html += "</div>"
+        
+        # Conclusiones y recomendaciones
+        html += "<h2>📌 CONCLUSIONES Y RECOMENDACIONES</h2>"
+        
+        total_diff_epi12 = sum(d['diff_epi12'] for d in discrepancias)
+        total_diff_epi15 = sum(d['diff_epi15'] for d in discrepancias)
+        
+        if total_diff_epi12 != 0:
+            html += f"""
+            <p><strong>📌 EPI12:</strong> Debe {"agregar" if total_diff_epi12 < 0 else "eliminar"} {abs(total_diff_epi12)} registros para coincidir con SISPRO.</p>
+            <p><strong>Detalle por grupo etario:</strong></p>
+            <ul>
+            """
+            for disc in discrepancias:
+                if disc['diff_epi12'] != 0 and disc['grupos_faltantes_epi12']:
+                    for grupo in disc['grupos_faltantes_epi12']:
+                        if grupo['diferencia'] != 0:
+                            html += f"<li>{disc['mes']}: {grupo['grupo']} → {abs(grupo['diferencia'])} registros</li>"
+            html += "</ul>"
+        else:
+            html += "<p><strong>📌 EPI12:</strong> ✅ Ya está alineado con SISPRO.</p>"
+        
+        if total_diff_epi15 != 0:
+            html += f"""
+            <p><strong>📌 EPI15:</strong> Debe {"agregar" if total_diff_epi15 < 0 else "eliminar"} {abs(total_diff_epi15)} registros para coincidir con SISPRO.</p>
+            <p><strong>Detalle de enfermedades faltantes:</strong></p>
+            <ul>
+            """
+            for disc in discrepancias:
+                if disc['diff_epi15'] != 0 and disc['enfermedades_faltantes_epi15']:
+                    for enf in disc['enfermedades_faltantes_epi15'][:5]:
+                        html += f"<li>{disc['mes']}: {enf}</li>"
+                    if len(disc['enfermedades_faltantes_epi15']) > 5:
+                        html += f"<li>... y {len(disc['enfermedades_faltantes_epi15']) - 5} más</li>"
+            html += "</ul>"
+        else:
+            html += "<p><strong>📌 EPI15:</strong> ✅ Ya está alineado con SISPRO.</p>"
     
-    # Pie de página
-    doc.add_paragraph('')
-    doc.add_paragraph('---')
-    doc.add_paragraph('Reporte generado por Gestor de Morbilidad - Willian Almenar')
+    html += """
+        <div class="footer">
+            <p>Reporte generado por Gestor de Morbilidad - Willian Almenar</p>
+        </div>
+    </body>
+    </html>
+    """
     
-    return doc
+    return html
 
 def mostrar_analisis(df, info, tipo_archivo):
     if info is None or df is None:
@@ -535,7 +572,7 @@ if 'infos' not in st.session_state:
 tab1, tab2, tab3, tab4 = st.tabs([
     "📤 Carga de Archivos",
     "📊 Análisis de Discrepancias",
-    "📄 Generar Reporte Word",
+    "📄 Generar Reporte HTML",
     "📋 Reporte Consolidado"
 ])
 
@@ -646,7 +683,6 @@ with tab2:
                             st.write(f"- EPI12: {disc['epi12']} pacientes ({disc['diff_epi12']:+d})")
                             st.write(f"- EPI15: {disc['epi15']} registros ({disc['diff_epi15']:+d})")
                             
-                            # Verificar consistencia de EPI12
                             if disc['grupos_faltantes_epi12']:
                                 st.write("**🔴 Grupos etarios con diferencias en EPI12:**")
                                 suma_grupos = 0
@@ -671,7 +707,7 @@ with tab2:
         st.info("ℹ️ No hay archivos cargados.")
 
 with tab3:
-    st.header("📄 Generar Reporte en Word")
+    st.header("📄 Generar Reporte HTML")
     
     if st.session_state.dataframes:
         st.subheader("🔍 Configurar Reporte")
@@ -695,13 +731,13 @@ with tab3:
         col1, col2, col3, col4 = st.columns(4)
         
         with col1:
-            año_inicio = st.number_input("Año Inicio", min_value=2000, max_value=2100, value=año_min, key="word_año_ini")
+            año_inicio = st.number_input("Año Inicio", min_value=2000, max_value=2100, value=año_min, key="html_año_ini")
         with col2:
-            mes_inicio = st.selectbox("Mes Inicio", meses_disponibles, index=0, key="word_mes_ini")
+            mes_inicio = st.selectbox("Mes Inicio", meses_disponibles, index=0, key="html_mes_ini")
         with col3:
-            año_fin = st.number_input("Año Fin", min_value=2000, max_value=2100, value=año_max, key="word_año_fin")
+            año_fin = st.number_input("Año Fin", min_value=2000, max_value=2100, value=año_max, key="html_año_fin")
         with col4:
-            mes_fin = st.selectbox("Mes Fin", meses_disponibles, index=6, key="word_mes_fin")
+            mes_fin = st.selectbox("Mes Fin", meses_disponibles, index=6, key="html_mes_fin")
         
         tipo_reporte = st.radio(
             "Tipo de Reporte:",
@@ -712,26 +748,27 @@ with tab3:
         if año_inicio > año_fin or (año_inicio == año_fin and mes_inicio > mes_fin):
             st.error("⚠️ El rango de fechas no es válido.")
         else:
-            if st.button("📄 Generar Reporte Word", type="primary"):
-                with st.spinner("Generando reporte en Word..."):
+            if st.button("📄 Generar Reporte HTML", type="primary"):
+                with st.spinner("Generando reporte HTML..."):
                     try:
-                        doc = generar_reporte_word(
+                        html_content = generar_reporte_html(
                             st.session_state.dataframes,
                             año_inicio, mes_inicio, año_fin, mes_fin,
                             'mensual' if tipo_reporte == "Mensual" else 'anual'
                         )
                         
-                        buffer = BytesIO()
-                        doc.save(buffer)
-                        buffer.seek(0)
+                        # Mostrar preview
+                        st.subheader("📄 Vista Previa del Reporte")
+                        st.components.v1.html(html_content, height=600, scrolling=True)
                         
-                        nombre_archivo = f"reporte_discrepancias_{tipo_reporte.lower()}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
+                        # Descargar
+                        nombre_archivo = f"reporte_discrepancias_{tipo_reporte.lower()}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
                         
                         st.download_button(
-                            label="📥 Descargar Reporte Word",
-                            data=buffer,
+                            label="📥 Descargar Reporte HTML",
+                            data=html_content,
                             file_name=nombre_archivo,
-                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                            mime="text/html"
                         )
                         
                         st.success("✅ Reporte generado exitosamente!")
@@ -767,19 +804,28 @@ with tab4:
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ℹ️ Información de la Aplicación")
 st.sidebar.markdown("""
-**Versión:** 10.1  
+**Versión:** 11.0  
 **Desarrollador:** Willian Almenar  
 **Fecha:** 2024  
 **Propósito:** Generación de reportes de discrepancias
 """)
 
-st.sidebar.markdown("### 📄 Reportes Word")
+st.sidebar.markdown("### 📄 Reportes HTML")
 st.sidebar.markdown("""
 - **Mensuales:** Desglose por mes  
 - **Anuales:** Resumen consolidado  
 - **Detalle de discrepancias**  
 - **Grupos etarios con diferencias**  
 - **Enfermedades no reportadas**
+""")
+
+st.sidebar.markdown("### 🔍 Reportes en HTML")
+st.sidebar.markdown("""
+Los reportes se generan en formato HTML que:
+- ✅ Se pueden ver en cualquier navegador
+- ✅ Se pueden abrir en Word
+- ✅ Se pueden imprimir
+- ✅ No requieren dependencias adicionales
 """)
 
 # Contador de archivos cargados
@@ -798,6 +844,8 @@ if st.sidebar.button("🔄 Limpiar todos los datos"):
 st.sidebar.markdown("---")
 st.sidebar.markdown("### 📝 Nota")
 st.sidebar.markdown("""
-La suma de diferencias por grupo etario en EPI12 
-siempre coincidirá con la diferencia total.
+- La suma de diferencias por grupo etario en EPI12 
+  siempre coincidirá con la diferencia total.
+- Los reportes HTML se pueden abrir en Word para 
+  guardarlos como documentos .docx.
 """)
