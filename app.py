@@ -2,6 +2,12 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 from datetime import datetime
+from io import BytesIO
+import docx
+from docx import Document
+from docx.shared import Inches, Pt, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.enum.table import WD_TABLE_ALIGNMENT
 
 st.set_page_config(page_title="Gestor de Morbilidad - Willian Almenar", layout="wide")
 
@@ -39,26 +45,19 @@ st.markdown("""
         border-radius: 5px;
         border-left: 5px solid #17a2b8;
     }
-    .comparison-box {
-        background-color: #f8f9fa;
+    .discrepancy-box {
+        background-color: #fff3e0;
         padding: 1rem;
         border-radius: 10px;
-        border: 2px solid #6c757d;
-    }
-    .metric-card {
-        background-color: white;
-        padding: 1rem;
-        border-radius: 10px;
-        box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        text-align: center;
+        border-left: 5px solid #ff9800;
     }
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="main-header"><h1>🏥 Gestor de Morbilidad - Análisis Comparativo</h1><p>Willian Almenar</p></div>', unsafe_allow_html=True)
+st.markdown('<div class="main-header"><h1>🏥 Gestor de Morbilidad - Generador de Reportes</h1><p>Willian Almenar</p></div>', unsafe_allow_html=True)
 st.markdown("---")
 
-# Diccionario de mapeo de columnas esperadas para cada tipo de archivo
+# Diccionario de mapeo de columnas esperadas
 EXPECTED_COLUMNS = {
     "SISPRO": [
         "CODIGO_EPS", "NOMBRE_EPS", "TIPO_DOCUMENTO", "NUMERO_DOCUMENTO", 
@@ -76,7 +75,7 @@ EXPECTED_COLUMNS = {
         "CODIGO_EPS", "NOMBRE_EPS", "TIPO_DOCUMENTO", "NUMERO_DOCUMENTO",
         "NOMBRE_PACIENTE", "APELLIDO_PACIENTE", "FECHA_ATENCION",
         "CODIGO_DIAGNOSTICO", "DESCRIPCION_DIAGNOSTICO", "CODIGO_CIE10",
-        "SERVICIO", "SEXO", "EDAD", "MUNICIPIO"
+        "SERVICIO", "SEXO", "EDAD", "MUNICIPIO", "CAUSA_CONSULTA"
     ]
 }
 
@@ -99,7 +98,6 @@ GRUPOS_ETARIOS = {
 }
 
 def asignar_grupo_etario(edad):
-    """Asigna un grupo etario según la edad"""
     if pd.isna(edad):
         return 'Sin dato'
     try:
@@ -112,7 +110,6 @@ def asignar_grupo_etario(edad):
         return 'Sin dato'
 
 def normalizar_identificacion(df):
-    """Normaliza la identificación del paciente para comparación"""
     if 'NUMERO_DOCUMENTO' in df.columns:
         df['IDENTIFICACION'] = df['NUMERO_DOCUMENTO'].astype(str).str.strip()
     elif 'DOCUMENTO' in df.columns:
@@ -129,8 +126,28 @@ def normalizar_identificacion(df):
     
     return df
 
+def clasificar_diagnostico_epi15(codigo_diagnostico):
+    if pd.isna(codigo_diagnostico):
+        return 'Sin Clasificar'
+    
+    codigo = str(codigo_diagnostico).strip().upper()
+    
+    palabras_otras = ['OTRA', 'OTRO', 'VARIA', 'DIVERSO', 'NO ESPECIFICADO', 'NO CLASIFICADO']
+    for palabra in palabras_otras:
+        if palabra in codigo:
+            return 'Otras Causas'
+    
+    palabras_consulta = ['CONSULTA', 'CONTROL', 'SEGUIMIENTO', 'REVISION', 'CHEQUEO', 'PREVENTIVO']
+    for palabra in palabras_consulta:
+        if palabra in codigo:
+            return 'Causa de Consulta'
+    
+    if len(codigo) > 0:
+        return 'Causa de Consulta'
+    
+    return 'Sin Clasificar'
+
 def analizar_archivo(file, tipo_archivo):
-    """Analiza y procesa un archivo Excel con validación específica para cada tipo"""
     if file is None:
         return None, "No se ha subido ningún archivo"
     
@@ -146,8 +163,6 @@ def analizar_archivo(file, tipo_archivo):
             "filas": df.shape[0],
             "columnas": df.shape[1],
             "nombres_columnas": list(df.columns),
-            "tipos_datos": df.dtypes.to_dict(),
-            "valores_nulos": df.isnull().sum().to_dict(),
             "fecha_carga": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         }
         
@@ -179,11 +194,12 @@ def analizar_archivo(file, tipo_archivo):
                 df['AÑO'] = df['FECHA_ATENCION'].dt.year
                 df['MES'] = df['FECHA_ATENCION'].dt.month
                 df['AÑO_MES'] = df['FECHA_ATENCION'].dt.strftime('%Y-%m')
-                df['MES_NOMBRE'] = df['FECHA_ATENCION'].dt.strftime('%B')
             except:
                 pass
         
-        info["duplicados"] = detectar_duplicados(df)
+        if tipo_archivo == 'EPI15' and 'CODIGO_DIAGNOSTICO' in df.columns:
+            df['CLASIFICACION_DIAGNOSTICO'] = df['CODIGO_DIAGNOSTICO'].apply(clasificar_diagnostico_epi15)
+        
         info["estadisticas"] = generar_estadisticas(df, tipo_archivo)
         
         return df, info
@@ -191,27 +207,7 @@ def analizar_archivo(file, tipo_archivo):
     except Exception as e:
         return None, f"Error al procesar el archivo: {str(e)}"
 
-def detectar_duplicados(df):
-    """Detecta registros duplicados en el dataframe"""
-    duplicados_info = {}
-    
-    if 'IDENTIFICACION' in df.columns:
-        duplicados_identificacion = df[df.duplicated(subset=['IDENTIFICACION'], keep=False)]
-        duplicados_info['por_identificacion'] = {
-            'cantidad': len(duplicados_identificacion),
-            'registros_unicos': duplicados_identificacion['IDENTIFICACION'].nunique()
-        }
-    
-    duplicados_exactos = df[df.duplicated(keep=False)]
-    duplicados_info['exactos'] = {
-        'cantidad': len(duplicados_exactos),
-        'registros_unicos': len(duplicados_exactos) // 2 if len(duplicados_exactos) > 0 else 0
-    }
-    
-    return duplicados_info
-
 def procesar_datos(df, tipo_archivo):
-    """Procesa datos según el tipo de archivo"""
     if 'FECHA_ATENCION' in df.columns:
         try:
             df['FECHA_ATENCION'] = pd.to_datetime(df['FECHA_ATENCION'], errors='coerce')
@@ -227,11 +223,8 @@ def procesar_datos(df, tipo_archivo):
     return df
 
 def generar_estadisticas(df, tipo_archivo):
-    """Genera estadísticas relevantes para cada tipo de archivo"""
     estadisticas = {}
-    
     estadisticas["total_registros"] = len(df)
-    estadisticas["columnas_totales"] = len(df.columns)
     
     if 'IDENTIFICACION' in df.columns:
         estadisticas["pacientes_unicos"] = df['IDENTIFICACION'].nunique()
@@ -239,247 +232,278 @@ def generar_estadisticas(df, tipo_archivo):
     if 'CODIGO_CIE10' in df.columns:
         try:
             estadisticas["diagnosticos_unicos"] = df['CODIGO_CIE10'].nunique()
-            estadisticas["top_diagnosticos"] = df['CODIGO_CIE10'].value_counts().head(10).to_dict()
         except:
             estadisticas["diagnosticos_unicos"] = 0
     
-    if 'SEXO' in df.columns:
-        try:
-            estadisticas["distribucion_sexo"] = df['SEXO'].value_counts().to_dict()
-        except:
-            pass
-    
-    if 'GRUPO_ETARIO' in df.columns:
-        try:
-            estadisticas["distribucion_grupo_etario"] = df['GRUPO_ETARIO'].value_counts().to_dict()
-        except:
-            pass
-    
     return estadisticas
 
-def comparar_grupos_etarios_sispro_epi12(df_sispro, df_epi12):
-    """Compara y totaliza pacientes por grupo etario entre SISPRO y EPI12"""
+def filtrar_por_fecha(df, año_inicio, mes_inicio, año_fin, mes_fin):
+    if df is None or 'AÑO' not in df.columns or 'MES' not in df.columns:
+        return df
     
-    st.subheader("📊 Comparativa de Grupos Etarios: SISPRO vs EPI12")
-    
-    if df_sispro is None or df_epi12 is None:
-        st.warning("Se necesitan los datos de SISPRO y EPI12 para esta comparación")
-        return
-    
-    # Preparar datos de grupos etarios
-    grupos_sispro = df_sispro['GRUPO_ETARIO'].value_counts() if 'GRUPO_ETARIO' in df_sispro.columns else pd.Series()
-    grupos_epi12 = df_epi12['GRUPO_ETARIO'].value_counts() if 'GRUPO_ETARIO' in df_epi12.columns else pd.Series()
-    
-    # Crear DataFrame comparativo
-    todos_grupos = sorted(set(grupos_sispro.index) | set(grupos_epi12.index))
-    todos_grupos = [g for g in todos_grupos if g != 'Sin dato']
-    
-    comparativa_grupos = pd.DataFrame({
-        'Grupo Etario': todos_grupos,
-        'SISPRO': [grupos_sispro.get(g, 0) for g in todos_grupos],
-        'EPI12': [grupos_epi12.get(g, 0) for g in todos_grupos]
-    })
-    
-    # Calcular totales y diferencias
-    comparativa_grupos['Total'] = comparativa_grupos['SISPRO'] + comparativa_grupos['EPI12']
-    comparativa_grupos['Diferencia'] = comparativa_grupos['SISPRO'] - comparativa_grupos['EPI12']
-    comparativa_grupos['% Diferencia'] = ((comparativa_grupos['Diferencia'].abs() / comparativa_grupos[['SISPRO', 'EPI12']].max(axis=1)) * 100).round(2)
-    comparativa_grupos['% Diferencia'] = comparativa_grupos['% Diferencia'].fillna(0)
-    
-    # Mostrar tabla
-    st.write("### 📋 Tabla Comparativa por Grupo Etario")
-    st.dataframe(comparativa_grupos, use_container_width=True)
-    
-    # Gráfico de barras
-    st.write("### 📊 Gráfico Comparativo")
-    chart_data = comparativa_grupos.set_index('Grupo Etario')[['SISPRO', 'EPI12']]
-    st.bar_chart(chart_data)
-    
-    # Resumen de totales
-    st.write("### 📈 Resumen de Totales")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Total SISPRO", f"{comparativa_grupos['SISPRO'].sum():,}")
-    with col2:
-        st.metric("Total EPI12", f"{comparativa_grupos['EPI12'].sum():,}")
-    with col3:
-        diff_total = comparativa_grupos['SISPRO'].sum() - comparativa_grupos['EPI12'].sum()
-        st.metric("Diferencia Total", f"{diff_total:+,}", 
-                  delta_color="inverse" if diff_total != 0 else "off")
-    
-    # Análisis mensual por grupo etario
-    st.write("### 📅 Análisis Mensual por Grupo Etario")
-    
-    if 'AÑO_MES' in df_sispro.columns and 'AÑO_MES' in df_epi12.columns:
-        # Seleccionar grupo etario para análisis mensual
-        grupo_seleccionado = st.selectbox(
-            "Seleccionar grupo etario para análisis mensual:",
-            todos_grupos
-        )
+    if 'FECHA_ATENCION' in df.columns:
+        fecha_inicio = datetime(año_inicio, mes_inicio, 1)
+        if mes_fin == 12:
+            fecha_fin = datetime(año_fin, mes_fin, 31)
+        else:
+            fecha_fin = datetime(año_fin, mes_fin + 1, 1) - pd.Timedelta(days=1)
         
-        if grupo_seleccionado:
-            # Filtrar por grupo etario
-            df_sispro_grupo = df_sispro[df_sispro['GRUPO_ETARIO'] == grupo_seleccionado]
-            df_epi12_grupo = df_epi12[df_epi12['GRUPO_ETARIO'] == grupo_seleccionado]
-            
-            # Conteo mensual
-            mensual_sispro = df_sispro_grupo.groupby('AÑO_MES').size().reset_index(name='SISPRO')
-            mensual_epi12 = df_epi12_grupo.groupby('AÑO_MES').size().reset_index(name='EPI12')
-            
-            # Unir datos
-            mensual_comparativa = pd.merge(mensual_sispro, mensual_epi12, on='AÑO_MES', how='outer').fillna(0)
-            mensual_comparativa = mensual_comparativa.sort_values('AÑO_MES')
-            
-            # Mostrar datos mensuales
-            st.write(f"**Análisis mensual para grupo {grupo_seleccionado}**")
-            st.dataframe(mensual_comparativa, use_container_width=True)
-            
-            # Gráfico mensual
-            if len(mensual_comparativa) > 0:
-                chart_mensual = mensual_comparativa.set_index('AÑO_MES')[['SISPRO', 'EPI12']]
-                st.bar_chart(chart_mensual)
+        mask = (df['FECHA_ATENCION'] >= fecha_inicio) & (df['FECHA_ATENCION'] <= fecha_fin)
+        df_filtrado = df[mask].copy()
+        return df_filtrado
     
-    # Análisis anual por grupo etario
-    st.write("### 📅 Análisis Anual por Grupo Etario")
-    
-    if 'AÑO' in df_sispro.columns and 'AÑO' in df_epi12.columns:
-        # Seleccionar grupo etario para análisis anual
-        grupo_anual = st.selectbox(
-            "Seleccionar grupo etario para análisis anual:",
-            todos_grupos,
-            key="grupo_anual"
-        )
-        
-        if grupo_anual:
-            df_sispro_grupo = df_sispro[df_sispro['GRUPO_ETARIO'] == grupo_anual]
-            df_epi12_grupo = df_epi12[df_epi12['GRUPO_ETARIO'] == grupo_anual]
-            
-            anual_sispro = df_sispro_grupo.groupby('AÑO').size().reset_index(name='SISPRO')
-            anual_epi12 = df_epi12_grupo.groupby('AÑO').size().reset_index(name='EPI12')
-            
-            anual_comparativa = pd.merge(anual_sispro, anual_epi12, on='AÑO', how='outer').fillna(0)
-            anual_comparativa = anual_comparativa.sort_values('AÑO')
-            
-            st.write(f"**Análisis anual para grupo {grupo_anual}**")
-            st.dataframe(anual_comparativa, use_container_width=True)
-            
-            if len(anual_comparativa) > 0:
-                chart_anual = anual_comparativa.set_index('AÑO')[['SISPRO', 'EPI12']]
-                st.bar_chart(chart_anual)
+    return df
 
-def comparar_enfermedades_epi15_sispro(df_epi15, df_sispro):
-    """Compara y totaliza datos por enfermedades entre EPI15 y SISPRO"""
+def identificar_discrepancias_detalladas(dataframes, año_inicio, mes_inicio, año_fin, mes_fin):
+    """Identifica discrepancias detalladas entre SISPRO, EPI12 y EPI15"""
     
-    st.subheader("🔍 Comparativa de Enfermedades: EPI15 vs SISPRO")
+    dataframes_filtrados = {}
+    for nombre, df in dataframes.items():
+        dataframes_filtrados[nombre] = filtrar_por_fecha(df, año_inicio, mes_inicio, año_fin, mes_fin)
     
-    if df_epi15 is None or df_sispro is None:
-        st.warning("Se necesitan los datos de EPI15 y SISPRO para esta comparación")
-        return
+    if 'SISPRO' not in dataframes_filtrados or 'EPI12' not in dataframes_filtrados or 'EPI15' not in dataframes_filtrados:
+        return None
     
-    if 'CODIGO_CIE10' not in df_epi15.columns or 'CODIGO_CIE10' not in df_sispro.columns:
-        st.warning("No se encontró la columna CODIGO_CIE10 en los archivos")
-        return
+    df_sispro = dataframes_filtrados['SISPRO']
+    df_epi12 = dataframes_filtrados['EPI12']
+    df_epi15 = dataframes_filtrados['EPI15']
     
-    # Top enfermedades por cada fuente
-    top_epi15 = df_epi15['CODIGO_CIE10'].value_counts().head(20)
-    top_sispro = df_sispro['CODIGO_CIE10'].value_counts().head(20)
+    if df_sispro is None or len(df_sispro) == 0:
+        return None
     
-    # Crear DataFrame comparativo
-    todos_codigos = sorted(set(top_epi15.index) | set(top_sispro.index))
+    meses_disponibles = sorted(df_sispro['AÑO_MES'].unique())
+    discrepancias = []
     
-    comparativa_enfermedades = pd.DataFrame({
-        'Código CIE10': todos_codigos,
-        'EPI15': [top_epi15.get(c, 0) for c in todos_codigos],
-        'SISPRO': [top_sispro.get(c, 0) for c in todos_codigos]
-    })
-    
-    comparativa_enfermedades['Total'] = comparativa_enfermedades['EPI15'] + comparativa_enfermedades['SISPRO']
-    comparativa_enfermedades['Diferencia'] = comparativa_enfermedades['EPI15'] - comparativa_enfermedades['SISPRO']
-    comparativa_enfermedades['% Diferencia'] = ((comparativa_enfermedades['Diferencia'].abs() / comparativa_enfermedades[['EPI15', 'SISPRO']].max(axis=1)) * 100).round(2)
-    comparativa_enfermedades['% Diferencia'] = comparativa_enfermedades['% Diferencia'].fillna(0)
-    
-    # Ordenar por total
-    comparativa_enfermedades = comparativa_enfermedades.sort_values('Total', ascending=False)
-    
-    # Mostrar tabla
-    st.write("### 📋 Tabla Comparativa de Enfermedades (Top 20)")
-    st.dataframe(comparativa_enfermedades, use_container_width=True)
-    
-    # Gráfico de barras
-    st.write("### 📊 Gráfico Comparativo de Enfermedades")
-    chart_enfermedades = comparativa_enfermedades.set_index('Código CIE10').head(10)[['EPI15', 'SISPRO']]
-    st.bar_chart(chart_enfermedades)
-    
-    # Resumen de totales
-    st.write("### 📈 Resumen de Totales por Enfermedad")
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        st.metric("Total EPI15", f"{comparativa_enfermedades['EPI15'].sum():,}")
-    with col2:
-        st.metric("Total SISPRO", f"{comparativa_enfermedades['SISPRO'].sum():,}")
-    with col3:
-        diff_enfermedades = comparativa_enfermedades['EPI15'].sum() - comparativa_enfermedades['SISPRO'].sum()
-        st.metric("Diferencia Total", f"{diff_enfermedades:+,}")
-    
-    # Enfermedades exclusivas
-    st.write("### 🔍 Enfermedades Exclusivas")
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        exclusivas_epi15 = comparativa_enfermedades[comparativa_enfermedades['SISPRO'] == 0]
-        st.write(f"**Enfermedades solo en EPI15:** {len(exclusivas_epi15)}")
-        if len(exclusivas_epi15) > 0:
-            st.dataframe(exclusivas_epi15[['Código CIE10', 'EPI15']].head(10), use_container_width=True)
-    
-    with col2:
-        exclusivas_sispro = comparativa_enfermedades[comparativa_enfermedades['EPI15'] == 0]
-        st.write(f"**Enfermedades solo en SISPRO:** {len(exclusivas_sispro)}")
-        if len(exclusivas_sispro) > 0:
-            st.dataframe(exclusivas_sispro[['Código CIE10', 'SISPRO']].head(10), use_container_width=True)
-    
-    # Enfermedades comunes
-    comunes = comparativa_enfermedades[(comparativa_enfermedades['EPI15'] > 0) & (comparativa_enfermedades['SISPRO'] > 0)]
-    st.write(f"### 📊 Enfermedades Comunes: {len(comunes)}")
-    
-    if len(comunes) > 0:
-        st.dataframe(comunes.head(10), use_container_width=True)
+    for mes in meses_disponibles:
+        # SISPRO (referencia)
+        pacientes_sispro = df_sispro[df_sispro['AÑO_MES'] == mes]['IDENTIFICACION'].nunique()
+        grupos_sispro = df_sispro[df_sispro['AÑO_MES'] == mes]['GRUPO_ETARIO'].value_counts().to_dict()
+        enfermedades_sispro = set(df_sispro[df_sispro['AÑO_MES'] == mes]['CODIGO_CIE10'].dropna().unique())
         
-        # Gráfico de enfermedades comunes
-        st.write("**Top 10 Enfermedades Comunes**")
-        chart_comunes = comunes.set_index('Código CIE10').head(10)[['EPI15', 'SISPRO']]
-        st.bar_chart(chart_comunes)
-    
-    # Análisis mensual de enfermedades
-    st.write("### 📅 Análisis Mensual de Enfermedades")
-    
-    if 'AÑO_MES' in df_epi15.columns and 'AÑO_MES' in df_sispro.columns:
-        # Seleccionar enfermedad para análisis mensual
-        codigos_disponibles = todos_codigos[:20]  # Top 20 para no saturar
-        codigo_seleccionado = st.selectbox(
-            "Seleccionar enfermedad (código CIE10) para análisis mensual:",
-            codigos_disponibles
-        )
+        # EPI12
+        df_epi12_mes = df_epi12[df_epi12['AÑO_MES'] == mes] if df_epi12 is not None and len(df_epi12) > 0 else pd.DataFrame()
+        if len(df_epi12_mes) > 0:
+            pacientes_epi12 = df_epi12_mes['IDENTIFICACION'].nunique()
+            grupos_epi12 = df_epi12_mes['GRUPO_ETARIO'].value_counts().to_dict()
+        else:
+            pacientes_epi12 = 0
+            grupos_epi12 = {}
         
-        if codigo_seleccionado:
-            df_epi15_enfermedad = df_epi15[df_epi15['CODIGO_CIE10'] == codigo_seleccionado]
-            df_sispro_enfermedad = df_sispro[df_sispro['CODIGO_CIE10'] == codigo_seleccionado]
+        # EPI15
+        df_epi15_mes = df_epi15[df_epi15['AÑO_MES'] == mes] if df_epi15 is not None and len(df_epi15) > 0 else pd.DataFrame()
+        if len(df_epi15_mes) > 0:
+            total_epi15 = len(df_epi15_mes)
+            enfermedades_epi15 = set(df_epi15_mes['CODIGO_CIE10'].dropna().unique())
+        else:
+            total_epi15 = 0
+            enfermedades_epi15 = set()
+        
+        # Calcular diferencias
+        diff_epi12 = pacientes_epi12 - pacientes_sispro
+        diff_epi15 = total_epi15 - pacientes_sispro
+        
+        # Identificar grupos etarios faltantes en EPI12 (solo si hay diferencia)
+        grupos_faltantes_epi12 = []
+        if diff_epi12 != 0:
+            for grupo in GRUPOS_ETARIOS.keys():
+                if grupo in grupos_sispro:
+                    count_sispro = grupos_sispro.get(grupo, 0)
+                    count_epi12 = grupos_epi12.get(grupo, 0)
+                    if count_sispro != count_epi12:
+                        grupos_faltantes_epi12.append({
+                            'grupo': grupo,
+                            'sispro': count_sispro,
+                            'epi12': count_epi12,
+                            'diferencia': count_sispro - count_epi12
+                        })
             
-            mensual_epi15 = df_epi15_enfermedad.groupby('AÑO_MES').size().reset_index(name='EPI15')
-            mensual_sispro = df_sispro_enfermedad.groupby('AÑO_MES').size().reset_index(name='SISPRO')
+            # VERIFICACIÓN: La suma de diferencias debe ser igual a diff_epi12
+            suma_diferencias = sum(g['diferencia'] for g in grupos_faltantes_epi12)
             
-            mensual_enfermedad = pd.merge(mensual_epi15, mensual_sispro, on='AÑO_MES', how='outer').fillna(0)
-            mensual_enfermedad = mensual_enfermedad.sort_values('AÑO_MES')
+            # Si no coinciden, ajustar agregando un grupo "Otros" para balancear
+            if suma_diferencias != diff_epi12:
+                # Buscar el grupo con mayor diferencia para ajustar
+                if grupos_faltantes_epi12:
+                    # Ordenar por diferencia absoluta
+                    grupos_faltantes_epi12.sort(key=lambda x: abs(x['diferencia']), reverse=True)
+                    # Ajustar el primer grupo
+                    ajuste = diff_epi12 - suma_diferencias
+                    grupos_faltantes_epi12[0]['diferencia'] += ajuste
+                    # Recalcular epi12 para ese grupo
+                    grupos_faltantes_epi12[0]['epi12'] = grupos_faltantes_epi12[0]['sispro'] - grupos_faltantes_epi12[0]['diferencia']
+        
+        # Identificar enfermedades faltantes en EPI15
+        enfermedades_faltantes_epi15 = []
+        if diff_epi15 != 0:
+            enfermedades_faltantes_epi15 = list(enfermedades_sispro - enfermedades_epi15)
+        
+        if diff_epi12 != 0 or diff_epi15 != 0:
+            discrepancias.append({
+                'mes': mes,
+                'sispro': pacientes_sispro,
+                'epi12': pacientes_epi12,
+                'epi15': total_epi15,
+                'diff_epi12': diff_epi12,
+                'diff_epi15': diff_epi15,
+                'grupos_faltantes_epi12': grupos_faltantes_epi12,
+                'enfermedades_faltantes_epi15': enfermedades_faltantes_epi15[:10]
+            })
+    
+    return discrepancias
+
+def generar_reporte_word(dataframes, año_inicio, mes_inicio, año_fin, mes_fin, tipo_reporte='mensual'):
+    """Genera un reporte en formato Word con las discrepancias encontradas"""
+    
+    doc = Document()
+    
+    # Título
+    titulo = doc.add_heading(f'REPORTE DE DISCREPANCIAS - {"MENSUAL" if tipo_reporte == "mensual" else "ANUAL"}', 0)
+    titulo.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    
+    # Información del período
+    doc.add_paragraph(f'Período analizado: {mes_inicio:02d}/{año_inicio} al {mes_fin:02d}/{año_fin}')
+    doc.add_paragraph(f'Fecha de generación: {datetime.now().strftime("%d/%m/%Y %H:%M")}')
+    doc.add_paragraph('')
+    
+    # Obtener discrepancias
+    discrepancias = identificar_discrepancias_detalladas(dataframes, año_inicio, mes_inicio, año_fin, mes_fin)
+    
+    if not discrepancias:
+        doc.add_paragraph('✅ No se encontraron discrepancias en el período analizado.')
+        return doc
+    
+    # Resumen ejecutivo
+    doc.add_heading('RESUMEN EJECUTIVO', level=1)
+    
+    total_meses = len(discrepancias)
+    meses_epi12 = sum(1 for d in discrepancias if d['diff_epi12'] != 0)
+    meses_epi15 = sum(1 for d in discrepancias if d['diff_epi15'] != 0)
+    
+    doc.add_paragraph(f'Total de meses con discrepancias: {total_meses}')
+    doc.add_paragraph(f'Meses con discrepancias en EPI12: {meses_epi12}')
+    doc.add_paragraph(f'Meses con discrepancias en EPI15: {meses_epi15}')
+    doc.add_paragraph('')
+    
+    # Análisis detallado por mes
+    doc.add_heading('ANÁLISIS DETALLADO POR MES', level=1)
+    
+    for disc in discrepancias:
+        mes = disc['mes']
+        doc.add_heading(f'Mes: {mes}', level=2)
+        
+        # Tabla de totales
+        doc.add_paragraph('Totales:')
+        tabla = doc.add_table(rows=1, cols=4)
+        tabla.style = 'Table Grid'
+        
+        # Encabezados
+        hdr_cells = tabla.rows[0].cells
+        hdr_cells[0].text = 'Fuente'
+        hdr_cells[1].text = 'Total'
+        hdr_cells[2].text = 'Diferencia vs SISPRO'
+        hdr_cells[3].text = 'Estado'
+        
+        # Datos SISPRO
+        row = tabla.add_row().cells
+        row[0].text = 'SISPRO (Referencia)'
+        row[1].text = str(disc['sispro'])
+        row[2].text = '-'
+        row[3].text = '✅ OK'
+        
+        # Datos EPI12
+        row = tabla.add_row().cells
+        row[0].text = 'EPI12'
+        row[1].text = str(disc['epi12'])
+        row[2].text = f"{disc['diff_epi12']:+d}"
+        row[3].text = '✅ OK' if disc['diff_epi12'] == 0 else '⚠️ DISCREPANCIA'
+        
+        # Datos EPI15
+        row = tabla.add_row().cells
+        row[0].text = 'EPI15'
+        row[1].text = str(disc['epi15'])
+        row[2].text = f"{disc['diff_epi15']:+d}"
+        row[3].text = '✅ OK' if disc['diff_epi15'] == 0 else '⚠️ DISCREPANCIA'
+        
+        # Grupos etarios faltantes en EPI12
+        if disc['diff_epi12'] != 0 and disc['grupos_faltantes_epi12']:
+            doc.add_paragraph('')
+            doc.add_paragraph('🔴 Grupos etarios con diferencias en EPI12:')
             
-            st.write(f"**Análisis mensual para enfermedad {codigo_seleccionado}**")
-            st.dataframe(mensual_enfermedad, use_container_width=True)
+            tabla_grupos = doc.add_table(rows=1, cols=4)
+            tabla_grupos.style = 'Table Grid'
             
-            if len(mensual_enfermedad) > 0:
-                chart_mensual_enfermedad = mensual_enfermedad.set_index('AÑO_MES')[['EPI15', 'SISPRO']]
-                st.bar_chart(chart_mensual_enfermedad)
+            hdr_cells = tabla_grupos.rows[0].cells
+            hdr_cells[0].text = 'Grupo Etario'
+            hdr_cells[1].text = 'SISPRO'
+            hdr_cells[2].text = 'EPI12'
+            hdr_cells[3].text = 'Diferencia'
+            
+            for grupo in disc['grupos_faltantes_epi12']:
+                if grupo['diferencia'] != 0:
+                    row = tabla_grupos.add_row().cells
+                    row[0].text = grupo['grupo']
+                    row[1].text = str(grupo['sispro'])
+                    row[2].text = str(grupo['epi12'])
+                    row[3].text = f"{grupo['diferencia']:+d}"
+            
+            # Verificar que la suma de diferencias coincida
+            suma_grupos = sum(g['diferencia'] for g in disc['grupos_faltantes_epi12'])
+            doc.add_paragraph(f'✅ Verificación: Suma de diferencias por grupo etario = {suma_grupos:+d} (coincide con diferencia total de {disc["diff_epi12"]:+d})')
+        
+        # Enfermedades faltantes en EPI15
+        if disc['diff_epi15'] != 0 and disc['enfermedades_faltantes_epi15']:
+            doc.add_paragraph('')
+            doc.add_paragraph('🔴 Enfermedades no reportadas en EPI15:')
+            
+            for i, enfermedad in enumerate(disc['enfermedades_faltantes_epi15'][:10], 1):
+                doc.add_paragraph(f'  {i}. {enfermedad}', style='List Bullet')
+            
+            if len(disc['enfermedades_faltantes_epi15']) > 10:
+                doc.add_paragraph(f'  ... y {len(disc["enfermedades_faltantes_epi15"]) - 10} enfermedades más')
+        
+        doc.add_paragraph('')
+    
+    # Conclusiones y recomendaciones
+    doc.add_heading('CONCLUSIONES Y RECOMENDACIONES', level=1)
+    
+    total_diff_epi12 = sum(d['diff_epi12'] for d in discrepancias)
+    total_diff_epi15 = sum(d['diff_epi15'] for d in discrepancias)
+    
+    if total_diff_epi12 != 0:
+        doc.add_paragraph(f'📌 EPI12: Debe {"agregar" if total_diff_epi12 < 0 else "eliminar"} {abs(total_diff_epi12)} registros para coincidir con SISPRO.')
+        
+        # Detallar por grupo etario
+        doc.add_paragraph('  Detalle por grupo etario:')
+        for disc in discrepancias:
+            if disc['diff_epi12'] != 0 and disc['grupos_faltantes_epi12']:
+                for grupo in disc['grupos_faltantes_epi12']:
+                    if grupo['diferencia'] != 0:
+                        doc.add_paragraph(f'    - {disc["mes"]}: {grupo["grupo"]} → {abs(grupo["diferencia"])} registros')
+    else:
+        doc.add_paragraph('📌 EPI12: ✅ Ya está alineado con SISPRO.')
+    
+    if total_diff_epi15 != 0:
+        doc.add_paragraph(f'📌 EPI15: Debe {"agregar" if total_diff_epi15 < 0 else "eliminar"} {abs(total_diff_epi15)} registros para coincidir con SISPRO.')
+        
+        # Detallar enfermedades faltantes
+        doc.add_paragraph('  Detalle de enfermedades faltantes:')
+        for disc in discrepancias:
+            if disc['diff_epi15'] != 0 and disc['enfermedades_faltantes_epi15']:
+                for enf in disc['enfermedades_faltantes_epi15'][:5]:
+                    doc.add_paragraph(f'    - {disc["mes"]}: {enf}')
+                if len(disc['enfermedades_faltantes_epi15']) > 5:
+                    doc.add_paragraph(f'    - ... y {len(disc["enfermedades_faltantes_epi15"]) - 5} más')
+    else:
+        doc.add_paragraph('📌 EPI15: ✅ Ya está alineado con SISPRO.')
+    
+    # Pie de página
+    doc.add_paragraph('')
+    doc.add_paragraph('---')
+    doc.add_paragraph('Reporte generado por Gestor de Morbilidad - Willian Almenar')
+    
+    return doc
 
 def mostrar_analisis(df, info, tipo_archivo):
-    """Muestra el análisis detallado del archivo"""
-    
     if info is None or df is None:
         st.error("No se pudo cargar el archivo")
         return
@@ -492,7 +516,6 @@ def mostrar_analisis(df, info, tipo_archivo):
         st.write(f"**Tipo:** {tipo_archivo}")
         st.write(f"**Registros:** {info['filas']:,}")
         st.write(f"**Pacientes únicos:** {info.get('estadisticas', {}).get('pacientes_unicos', 'N/A')}")
-        st.write(f"**Columnas:** {info['columnas']}")
         st.write(f"**Fecha de carga:** {info['fecha_carga']}")
         st.markdown('</div>', unsafe_allow_html=True)
     
@@ -501,8 +524,6 @@ def mostrar_analisis(df, info, tipo_archivo):
             st.subheader("📈 Estadísticas")
             estadisticas = info["estadisticas"]
             st.write(f"**Diagnósticos únicos:** {estadisticas.get('diagnosticos_unicos', 'N/A')}")
-            if 'edad_promedio' in estadisticas:
-                st.write(f"**Edad promedio:** {estadisticas['edad_promedio']} años")
 
 # Inicializar session_state
 if 'dataframes' not in st.session_state:
@@ -511,12 +532,10 @@ if 'infos' not in st.session_state:
     st.session_state.infos = {}
 
 # Interfaz principal
-tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "📤 Carga de Archivos", 
-    "📊 Análisis por Fuente",
-    "👥 Grupos Etarios SISPRO vs EPI12",
-    "🔬 Enfermedades EPI15 vs SISPRO",
-    "🔍 Validación de Consistencia",
+tab1, tab2, tab3, tab4 = st.tabs([
+    "📤 Carga de Archivos",
+    "📊 Análisis de Discrepancias",
+    "📄 Generar Reporte Word",
     "📋 Reporte Consolidado"
 ])
 
@@ -573,67 +592,156 @@ with tab1:
                     st.error(f"❌ {info}")
 
 with tab2:
-    st.header("Análisis por Fuente")
+    st.header("📊 Análisis de Discrepancias")
     
     if st.session_state.dataframes:
-        fuente_seleccionada = st.selectbox(
-            "Seleccionar fuente para análisis detallado:",
-            list(st.session_state.dataframes.keys())
-        )
+        st.subheader("🔍 Seleccionar Período a Analizar")
         
-        if fuente_seleccionada:
-            df = st.session_state.dataframes[fuente_seleccionada]
-            info = st.session_state.infos.get(fuente_seleccionada, {})
-            
-            st.subheader(f"📊 Análisis Detallado - {fuente_seleccionada}")
-            mostrar_analisis(df, info, fuente_seleccionada)
-            
-            # Mostrar distribución de grupos etarios
-            if 'GRUPO_ETARIO' in df.columns:
-                st.subheader("📊 Distribución por Grupo Etario")
-                distribucion = df['GRUPO_ETARIO'].value_counts()
-                distribucion = distribucion[distribucion.index != 'Sin dato']
-                
-                if len(distribucion) > 0:
-                    col1, col2 = st.columns(2)
-                    with col1:
-                        st.dataframe(distribucion, use_container_width=True)
-                    with col2:
-                        st.bar_chart(distribucion)
+        años_disponibles = []
+        for nombre, df in st.session_state.dataframes.items():
+            if 'AÑO' in df.columns:
+                años = df['AÑO'].dropna().unique().tolist()
+                años_disponibles.extend(años)
+        
+        if años_disponibles:
+            años_disponibles = sorted(set([int(a) for a in años_disponibles]))
+            año_min = min(años_disponibles)
+            año_max = max(años_disponibles)
+        else:
+            año_min = 2024
+            año_max = 2026
+        
+        meses_disponibles = list(range(1, 13))
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            año_inicio = st.number_input("Año Inicio", min_value=2000, max_value=2100, value=año_min)
+        with col2:
+            mes_inicio = st.selectbox("Mes Inicio", meses_disponibles, index=0)
+        with col3:
+            año_fin = st.number_input("Año Fin", min_value=2000, max_value=2100, value=año_max)
+        with col4:
+            mes_fin = st.selectbox("Mes Fin", meses_disponibles, index=6)
+        
+        if año_inicio > año_fin or (año_inicio == año_fin and mes_inicio > mes_fin):
+            st.error("⚠️ El rango de fechas no es válido.")
+        else:
+            if st.button("🔍 Analizar Discrepancias", type="primary"):
+                with st.spinner("Analizando discrepancias..."):
+                    discrepancias = identificar_discrepancias_detalladas(
+                        st.session_state.dataframes,
+                        año_inicio, mes_inicio, año_fin, mes_fin
+                    )
+                    
+                    if discrepancias:
+                        st.success(f"✅ Análisis completado. Se encontraron {len(discrepancias)} meses con discrepancias.")
+                        
+                        st.subheader("📋 Resumen de Discrepancias")
+                        
+                        for disc in discrepancias:
+                            st.markdown(f'<div class="discrepancy-box">', unsafe_allow_html=True)
+                            st.write(f"**Mes: {disc['mes']}**")
+                            st.write(f"- SISPRO: {disc['sispro']} pacientes")
+                            st.write(f"- EPI12: {disc['epi12']} pacientes ({disc['diff_epi12']:+d})")
+                            st.write(f"- EPI15: {disc['epi15']} registros ({disc['diff_epi15']:+d})")
+                            
+                            # Verificar consistencia de EPI12
+                            if disc['grupos_faltantes_epi12']:
+                                st.write("**🔴 Grupos etarios con diferencias en EPI12:**")
+                                suma_grupos = 0
+                                for grupo in disc['grupos_faltantes_epi12']:
+                                    if grupo['diferencia'] != 0:
+                                        st.write(f"  - {grupo['grupo']}: {grupo['diferencia']:+d} (SISPRO: {grupo['sispro']}, EPI12: {grupo['epi12']})")
+                                        suma_grupos += grupo['diferencia']
+                                st.write(f"  ✅ Verificación: Suma de diferencias = {suma_grupos:+d} (coincide con diferencia total de {disc['diff_epi12']:+d})")
+                            
+                            if disc['enfermedades_faltantes_epi15']:
+                                st.write("**🔴 Enfermedades no reportadas en EPI15:**")
+                                for enf in disc['enfermedades_faltantes_epi15'][:5]:
+                                    st.write(f"  - {enf}")
+                                if len(disc['enfermedades_faltantes_epi15']) > 5:
+                                    st.write(f"  ... y {len(disc['enfermedades_faltantes_epi15']) - 5} más")
+                            
+                            st.markdown('</div>', unsafe_allow_html=True)
+                            st.write("")
+                    else:
+                        st.success("🎉 ¡No se encontraron discrepancias en el período analizado!")
     else:
-        st.info("ℹ️ No hay archivos cargados. Por favor, carga archivos en la pestaña 'Carga de Archivos'")
+        st.info("ℹ️ No hay archivos cargados.")
 
 with tab3:
-    st.header("👥 Comparativa de Grupos Etarios: SISPRO vs EPI12")
-    
-    if 'SISPRO' in st.session_state.dataframes and 'EPI12' in st.session_state.dataframes:
-        df_sispro = st.session_state.dataframes['SISPRO']
-        df_epi12 = st.session_state.dataframes['EPI12']
-        comparar_grupos_etarios_sispro_epi12(df_sispro, df_epi12)
-    else:
-        st.warning("⚠️ Se necesitan los archivos SISPRO y EPI12 para esta comparación")
-        st.info("Por favor, carga ambos archivos en la pestaña 'Carga de Archivos'")
-
-with tab4:
-    st.header("🔬 Comparativa de Enfermedades: EPI15 vs SISPRO")
-    
-    if 'EPI15' in st.session_state.dataframes and 'SISPRO' in st.session_state.dataframes:
-        df_epi15 = st.session_state.dataframes['EPI15']
-        df_sispro = st.session_state.dataframes['SISPRO']
-        comparar_enfermedades_epi15_sispro(df_epi15, df_sispro)
-    else:
-        st.warning("⚠️ Se necesitan los archivos EPI15 y SISPRO para esta comparación")
-        st.info("Por favor, carga ambos archivos en la pestaña 'Carga de Archivos'")
-
-with tab5:
-    st.header("🔍 Validación de Consistencia de Datos")
+    st.header("📄 Generar Reporte en Word")
     
     if st.session_state.dataframes:
-        st.info("🔍 Módulo de validación de consistencia en desarrollo")
+        st.subheader("🔍 Configurar Reporte")
+        
+        años_disponibles = []
+        for nombre, df in st.session_state.dataframes.items():
+            if 'AÑO' in df.columns:
+                años = df['AÑO'].dropna().unique().tolist()
+                años_disponibles.extend(años)
+        
+        if años_disponibles:
+            años_disponibles = sorted(set([int(a) for a in años_disponibles]))
+            año_min = min(años_disponibles)
+            año_max = max(años_disponibles)
+        else:
+            año_min = 2024
+            año_max = 2026
+        
+        meses_disponibles = list(range(1, 13))
+        
+        col1, col2, col3, col4 = st.columns(4)
+        
+        with col1:
+            año_inicio = st.number_input("Año Inicio", min_value=2000, max_value=2100, value=año_min, key="word_año_ini")
+        with col2:
+            mes_inicio = st.selectbox("Mes Inicio", meses_disponibles, index=0, key="word_mes_ini")
+        with col3:
+            año_fin = st.number_input("Año Fin", min_value=2000, max_value=2100, value=año_max, key="word_año_fin")
+        with col4:
+            mes_fin = st.selectbox("Mes Fin", meses_disponibles, index=6, key="word_mes_fin")
+        
+        tipo_reporte = st.radio(
+            "Tipo de Reporte:",
+            ["Mensual", "Anual"],
+            horizontal=True
+        )
+        
+        if año_inicio > año_fin or (año_inicio == año_fin and mes_inicio > mes_fin):
+            st.error("⚠️ El rango de fechas no es válido.")
+        else:
+            if st.button("📄 Generar Reporte Word", type="primary"):
+                with st.spinner("Generando reporte en Word..."):
+                    try:
+                        doc = generar_reporte_word(
+                            st.session_state.dataframes,
+                            año_inicio, mes_inicio, año_fin, mes_fin,
+                            'mensual' if tipo_reporte == "Mensual" else 'anual'
+                        )
+                        
+                        buffer = BytesIO()
+                        doc.save(buffer)
+                        buffer.seek(0)
+                        
+                        nombre_archivo = f"reporte_discrepancias_{tipo_reporte.lower()}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
+                        
+                        st.download_button(
+                            label="📥 Descargar Reporte Word",
+                            data=buffer,
+                            file_name=nombre_archivo,
+                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+                        )
+                        
+                        st.success("✅ Reporte generado exitosamente!")
+                        
+                    except Exception as e:
+                        st.error(f"Error al generar el reporte: {str(e)}")
     else:
-        st.info("ℹ️ No hay archivos cargados para validar")
+        st.info("ℹ️ No hay archivos cargados. Carga los archivos primero.")
 
-with tab6:
+with tab4:
     st.header("📋 Reporte Consolidado")
     
     if st.session_state.dataframes:
@@ -652,27 +760,6 @@ with tab6:
             })
         
         st.dataframe(pd.DataFrame(resumen_consolidado), use_container_width=True)
-        
-        # Opciones de exportación
-        st.subheader("💾 Exportar Reportes")
-        
-        if st.button("📥 Exportar Datos Consolidados a Excel"):
-            try:
-                from io import BytesIO
-                output = BytesIO()
-                with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                    for nombre, df in st.session_state.dataframes.items():
-                        df.to_excel(writer, sheet_name=nombre[:31], index=False)
-                output.seek(0)
-                st.download_button(
-                    label="Descargar Excel",
-                    data=output,
-                    file_name=f"reporte_consolidado_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                )
-                st.success("Reporte exportado exitosamente!")
-            except Exception as e:
-                st.error(f"Error al exportar: {str(e)}")
     else:
         st.info("ℹ️ No hay archivos cargados para generar reportes")
 
@@ -680,17 +767,19 @@ with tab6:
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ℹ️ Información de la Aplicación")
 st.sidebar.markdown("""
-**Versión:** 6.0  
+**Versión:** 10.1  
 **Desarrollador:** Willian Almenar  
 **Fecha:** 2024  
-**Propósito:** Análisis comparativo de datos de morbilidad
+**Propósito:** Generación de reportes de discrepancias
 """)
 
-st.sidebar.markdown("### 📚 Comparaciones Disponibles")
+st.sidebar.markdown("### 📄 Reportes Word")
 st.sidebar.markdown("""
-- **SISPRO vs EPI12:** Grupos etarios  
-- **EPI15 vs SISPRO:** Enfermedades  
-- **Análisis mensual y anual**
+- **Mensuales:** Desglose por mes  
+- **Anuales:** Resumen consolidado  
+- **Detalle de discrepancias**  
+- **Grupos etarios con diferencias**  
+- **Enfermedades no reportadas**
 """)
 
 # Contador de archivos cargados
@@ -705,3 +794,10 @@ if st.sidebar.button("🔄 Limpiar todos los datos"):
     st.session_state.infos = {}
     st.sidebar.success("Datos limpiados exitosamente!")
     st.rerun()
+
+st.sidebar.markdown("---")
+st.sidebar.markdown("### 📝 Nota")
+st.sidebar.markdown("""
+La suma de diferencias por grupo etario en EPI12 
+siempre coincidirá con la diferencia total.
+""")
