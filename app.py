@@ -186,11 +186,16 @@ def analizar_archivo(file, tipo_archivo):
         
         if 'FECHA_ATENCION' in df.columns:
             try:
+                df['FECHA_ATENCION'] = pd.to_datetime(df['FECHA_ATENCION'], errors='coerce')
                 df['AÑO'] = df['FECHA_ATENCION'].dt.year
                 df['MES'] = df['FECHA_ATENCION'].dt.month
                 df['AÑO_MES'] = df['FECHA_ATENCION'].dt.strftime('%Y-%m')
-            except:
-                pass
+            except Exception as e:
+                st.warning(f"Advertencia: No se pudieron procesar las fechas para {tipo_archivo}: {str(e)}")
+                # Crear columnas vacías si falla
+                df['AÑO'] = None
+                df['MES'] = None
+                df['AÑO_MES'] = None
         
         if tipo_archivo == 'EPI15' and 'CODIGO_DIAGNOSTICO' in df.columns:
             df['CLASIFICACION_DIAGNOSTICO'] = df['CODIGO_DIAGNOSTICO'].apply(clasificar_diagnostico_epi15)
@@ -203,12 +208,6 @@ def analizar_archivo(file, tipo_archivo):
         return None, f"Error al procesar el archivo: {str(e)}"
 
 def procesar_datos(df, tipo_archivo):
-    if 'FECHA_ATENCION' in df.columns:
-        try:
-            df['FECHA_ATENCION'] = pd.to_datetime(df['FECHA_ATENCION'], errors='coerce')
-        except:
-            pass
-    
     if 'EDAD' in df.columns:
         try:
             df['EDAD'] = pd.to_numeric(df['EDAD'], errors='coerce')
@@ -236,16 +235,24 @@ def filtrar_por_fecha(df, año_inicio, mes_inicio, año_fin, mes_fin):
     if df is None or 'AÑO' not in df.columns or 'MES' not in df.columns:
         return df
     
-    if 'FECHA_ATENCION' in df.columns:
-        fecha_inicio = datetime(año_inicio, mes_inicio, 1)
-        if mes_fin == 12:
-            fecha_fin = datetime(año_fin, mes_fin, 31)
-        else:
-            fecha_fin = datetime(año_fin, mes_fin + 1, 1) - pd.Timedelta(days=1)
-        
-        mask = (df['FECHA_ATENCION'] >= fecha_inicio) & (df['FECHA_ATENCION'] <= fecha_fin)
-        df_filtrado = df[mask].copy()
-        return df_filtrado
+    # Si no hay datos de fecha, devolver el dataframe original
+    if df['AÑO'].isna().all():
+        return df
+    
+    try:
+        # Crear columna de fecha para filtrado
+        if 'FECHA_ATENCION' in df.columns:
+            fecha_inicio = datetime(año_inicio, mes_inicio, 1)
+            if mes_fin == 12:
+                fecha_fin = datetime(año_fin, mes_fin, 31)
+            else:
+                fecha_fin = datetime(año_fin, mes_fin + 1, 1) - pd.Timedelta(days=1)
+            
+            mask = (df['FECHA_ATENCION'] >= fecha_inicio) & (df['FECHA_ATENCION'] <= fecha_fin)
+            df_filtrado = df[mask].copy()
+            return df_filtrado
+    except:
+        pass
     
     return df
 
@@ -266,29 +273,96 @@ def identificar_discrepancias_detalladas(dataframes, año_inicio, mes_inicio, a�
     if df_sispro is None or len(df_sispro) == 0:
         return None
     
-    meses_disponibles = sorted(df_sispro['AÑO_MES'].unique())
-    discrepancias = []
-    
-    for mes in meses_disponibles:
-        # SISPRO (referencia)
-        pacientes_sispro = df_sispro[df_sispro['AÑO_MES'] == mes]['IDENTIFICACION'].nunique()
-        grupos_sispro = df_sispro[df_sispro['AÑO_MES'] == mes]['GRUPO_ETARIO'].value_counts().to_dict()
-        enfermedades_sispro = set(df_sispro[df_sispro['AÑO_MES'] == mes]['CODIGO_CIE10'].dropna().unique())
+    # Verificar si existe la columna AÑO_MES
+    if 'AÑO_MES' not in df_sispro.columns or df_sispro['AÑO_MES'].isna().all():
+        # Si no hay fechas, usar todos los datos como un solo período
+        st.warning("⚠️ No se encontraron fechas válidas en SISPRO. Se analizarán todos los datos como un solo período.")
+        
+        # Analizar todos los datos sin desglose mensual
+        pacientes_sispro = df_sispro['IDENTIFICACION'].nunique()
+        grupos_sispro = df_sispro['GRUPO_ETARIO'].value_counts().to_dict() if 'GRUPO_ETARIO' in df_sispro.columns else {}
+        enfermedades_sispro = set(df_sispro['CODIGO_CIE10'].dropna().unique()) if 'CODIGO_CIE10' in df_sispro.columns else set()
         
         # EPI12
-        df_epi12_mes = df_epi12[df_epi12['AÑO_MES'] == mes] if df_epi12 is not None and len(df_epi12) > 0 else pd.DataFrame()
-        if len(df_epi12_mes) > 0:
-            pacientes_epi12 = df_epi12_mes['IDENTIFICACION'].nunique()
-            grupos_epi12 = df_epi12_mes['GRUPO_ETARIO'].value_counts().to_dict()
+        if df_epi12 is not None and len(df_epi12) > 0:
+            pacientes_epi12 = df_epi12['IDENTIFICACION'].nunique()
+            grupos_epi12 = df_epi12['GRUPO_ETARIO'].value_counts().to_dict() if 'GRUPO_ETARIO' in df_epi12.columns else {}
         else:
             pacientes_epi12 = 0
             grupos_epi12 = {}
         
         # EPI15
-        df_epi15_mes = df_epi15[df_epi15['AÑO_MES'] == mes] if df_epi15 is not None and len(df_epi15) > 0 else pd.DataFrame()
+        if df_epi15 is not None and len(df_epi15) > 0:
+            total_epi15 = len(df_epi15)
+            enfermedades_epi15 = set(df_epi15['CODIGO_CIE10'].dropna().unique()) if 'CODIGO_CIE10' in df_epi15.columns else set()
+        else:
+            total_epi15 = 0
+            enfermedades_epi15 = set()
+        
+        diff_epi12 = pacientes_epi12 - pacientes_sispro
+        diff_epi15 = total_epi15 - pacientes_sispro
+        
+        # Identificar grupos etarios faltantes
+        grupos_faltantes_epi12 = []
+        if diff_epi12 != 0:
+            for grupo in GRUPOS_ETARIOS.keys():
+                if grupo in grupos_sispro:
+                    count_sispro = grupos_sispro.get(grupo, 0)
+                    count_epi12 = grupos_epi12.get(grupo, 0)
+                    if count_sispro != count_epi12:
+                        grupos_faltantes_epi12.append({
+                            'grupo': grupo,
+                            'sispro': count_sispro,
+                            'epi12': count_epi12,
+                            'diferencia': count_sispro - count_epi12
+                        })
+        
+        # Identificar enfermedades faltantes
+        enfermedades_faltantes_epi15 = list(enfermedades_sispro - enfermedades_epi15) if diff_epi15 != 0 else []
+        
+        if diff_epi12 != 0 or diff_epi15 != 0:
+            return [{
+                'mes': 'Todos los datos',
+                'sispro': pacientes_sispro,
+                'epi12': pacientes_epi12,
+                'epi15': total_epi15,
+                'diff_epi12': diff_epi12,
+                'diff_epi15': diff_epi15,
+                'grupos_faltantes_epi12': grupos_faltantes_epi12,
+                'enfermedades_faltantes_epi15': enfermedades_faltantes_epi15[:10]
+            }]
+        else:
+            return []
+    
+    # Si hay fechas, analizar por mes
+    meses_disponibles = sorted(df_sispro['AÑO_MES'].dropna().unique())
+    
+    if len(meses_disponibles) == 0:
+        st.warning("⚠️ No se encontraron meses válidos en SISPRO.")
+        return []
+    
+    discrepancias = []
+    
+    for mes in meses_disponibles:
+        # SISPRO (referencia)
+        pacientes_sispro = df_sispro[df_sispro['AÑO_MES'] == mes]['IDENTIFICACION'].nunique()
+        grupos_sispro = df_sispro[df_sispro['AÑO_MES'] == mes]['GRUPO_ETARIO'].value_counts().to_dict() if 'GRUPO_ETARIO' in df_sispro.columns else {}
+        enfermedades_sispro = set(df_sispro[df_sispro['AÑO_MES'] == mes]['CODIGO_CIE10'].dropna().unique()) if 'CODIGO_CIE10' in df_sispro.columns else set()
+        
+        # EPI12
+        df_epi12_mes = df_epi12[df_epi12['AÑO_MES'] == mes] if df_epi12 is not None and len(df_epi12) > 0 and 'AÑO_MES' in df_epi12.columns else pd.DataFrame()
+        if len(df_epi12_mes) > 0:
+            pacientes_epi12 = df_epi12_mes['IDENTIFICACION'].nunique()
+            grupos_epi12 = df_epi12_mes['GRUPO_ETARIO'].value_counts().to_dict() if 'GRUPO_ETARIO' in df_epi12_mes.columns else {}
+        else:
+            pacientes_epi12 = 0
+            grupos_epi12 = {}
+        
+        # EPI15
+        df_epi15_mes = df_epi15[df_epi15['AÑO_MES'] == mes] if df_epi15 is not None and len(df_epi15) > 0 and 'AÑO_MES' in df_epi15.columns else pd.DataFrame()
         if len(df_epi15_mes) > 0:
             total_epi15 = len(df_epi15_mes)
-            enfermedades_epi15 = set(df_epi15_mes['CODIGO_CIE10'].dropna().unique())
+            enfermedades_epi15 = set(df_epi15_mes['CODIGO_CIE10'].dropna().unique()) if 'CODIGO_CIE10' in df_epi15_mes.columns else set()
         else:
             total_epi15 = 0
             enfermedades_epi15 = set()
@@ -315,7 +389,7 @@ def identificar_discrepancias_detalladas(dataframes, año_inicio, mes_inicio, a�
             # VERIFICACIÓN: La suma de diferencias debe ser igual a diff_epi12
             suma_diferencias = sum(g['diferencia'] for g in grupos_faltantes_epi12)
             
-            # Si no coinciden, ajustar agregando un grupo "Otros" para balancear
+            # Si no coinciden, ajustar
             if suma_diferencias != diff_epi12:
                 if grupos_faltantes_epi12:
                     grupos_faltantes_epi12.sort(key=lambda x: abs(x['diferencia']), reverse=True)
@@ -366,8 +440,6 @@ def generar_reporte_html(dataframes, año_inicio, mes_inicio, año_fin, mes_fin,
             .discrepancy {{ background-color: #fff3e0; border-left: 5px solid #ff9800; padding: 10px; margin: 15px 0; }}
             .success {{ background-color: #d4edda; border-left: 5px solid #28a745; padding: 10px; margin: 15px 0; }}
             .footer {{ text-align: center; margin-top: 40px; font-size: 12px; color: #666; border-top: 1px solid #ddd; padding-top: 20px; }}
-            .grupo-faltante {{ background-color: #fce4ec; }}
-            .enfermedad-faltante {{ background-color: #f3e5f5; }}
         </style>
     </head>
     <body>
@@ -379,7 +451,14 @@ def generar_reporte_html(dataframes, año_inicio, mes_inicio, año_fin, mes_fin,
         </div>
     """
     
-    if not discrepancias:
+    if discrepancias is None:
+        html += """
+        <div class="success">
+            <h3>⚠️ No se pudieron analizar los datos</h3>
+            <p>Verifica que los archivos estén correctamente cargados y tengan las columnas necesarias.</p>
+        </div>
+        """
+    elif not discrepancias:
         html += """
         <div class="success">
             <h3>✅ No se encontraron discrepancias en el período analizado.</h3>
@@ -671,7 +750,11 @@ with tab2:
                         año_inicio, mes_inicio, año_fin, mes_fin
                     )
                     
-                    if discrepancias:
+                    if discrepancias is None:
+                        st.error("❌ Error al analizar los datos. Verifica que los archivos estén correctamente cargados.")
+                    elif not discrepancias:
+                        st.success("🎉 ¡No se encontraron discrepancias en el período analizado!")
+                    else:
                         st.success(f"✅ Análisis completado. Se encontraron {len(discrepancias)} meses con discrepancias.")
                         
                         st.subheader("📋 Resumen de Discrepancias")
@@ -701,8 +784,6 @@ with tab2:
                             
                             st.markdown('</div>', unsafe_allow_html=True)
                             st.write("")
-                    else:
-                        st.success("🎉 ¡No se encontraron discrepancias en el período analizado!")
     else:
         st.info("ℹ️ No hay archivos cargados.")
 
@@ -804,7 +885,7 @@ with tab4:
 st.sidebar.markdown("---")
 st.sidebar.markdown("### ℹ️ Información de la Aplicación")
 st.sidebar.markdown("""
-**Versión:** 11.0  
+**Versión:** 11.1  
 **Desarrollador:** Willian Almenar  
 **Fecha:** 2024  
 **Propósito:** Generación de reportes de discrepancias
@@ -848,4 +929,6 @@ st.sidebar.markdown("""
   siempre coincidirá con la diferencia total.
 - Los reportes HTML se pueden abrir en Word para 
   guardarlos como documentos .docx.
+- Si no hay fechas válidas, se analizan todos los datos
+  como un solo período.
 """)
