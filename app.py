@@ -78,7 +78,7 @@ st.markdown("""
     </style>
 """, unsafe_allow_html=True)
 
-st.markdown('<div class="main-header"><h1>🏥 Gestor de Morbilidad - Validación de Reportes</h1><p>Willian Almenar</p></div>', unsafe_allow_html=True)
+st.markdown('<div class="main-header"><h1>Gestor de Morbilidad - Validacion de Reportes</h1><p>Willian Almenar</p></div>', unsafe_allow_html=True)
 st.markdown("---")
 
 # ============ DICCIONARIOS Y FUNCIONES BASE ============
@@ -105,20 +105,20 @@ EXPECTED_COLUMNS = {
 }
 
 GRUPOS_ETARIOS = {
-    '0-4 años': (0, 4),
-    '5-9 años': (5, 9),
-    '10-14 años': (10, 14),
-    '15-19 años': (15, 19),
-    '20-24 años': (20, 24),
-    '25-29 años': (25, 29),
-    '30-34 años': (30, 34),
-    '35-39 años': (35, 39),
-    '40-44 años': (40, 44),
-    '45-49 años': (45, 49),
-    '50-54 años': (50, 54),
-    '55-59 años': (55, 59),
-    '60-64 años': (60, 64),
-    '65+ años': (65, 150)
+    '0-4 anos': (0, 4),
+    '5-9 anos': (5, 9),
+    '10-14 anos': (10, 14),
+    '15-19 anos': (15, 19),
+    '20-24 anos': (20, 24),
+    '25-29 anos': (25, 29),
+    '30-34 anos': (30, 34),
+    '35-39 anos': (35, 39),
+    '40-44 anos': (40, 44),
+    '45-49 anos': (45, 49),
+    '50-54 anos': (50, 54),
+    '55-59 anos': (55, 59),
+    '60-64 anos': (60, 64),
+    '65+ anos': (65, 150)
 }
 
 def asignar_grupo_etario(edad):
@@ -165,7 +165,7 @@ def clasificar_diagnostico_epi15(codigo_diagnostico):
 
 def detectar_columna_fecha(df):
     posibles_fechas = [
-        'FECHA_ATENCION', 'FECHA ATENCION', 'FECHADEATENCION', 'FECHA_ATENCIÓN',
+        'FECHA_ATENCION', 'FECHA ATENCION', 'FECHADEATENCION', 'FECHA_ATENCION',
         'FECHA_CONSULTA', 'FECHA CONSULTA', 'FECHACONSULTA',
         'FECHA_DE_ATENCION', 'FECHA_DE_CONSULTA',
         'FECHA_REGISTRO', 'FECHA REGISTRO', 'FECHAREGISTRO',
@@ -242,9 +242,9 @@ def analizar_archivo(file, tipo_archivo):
             fechas, mensaje = convertir_fechas(df, columna_fecha)
             if fechas is not None:
                 df['FECHA_ATENCION'] = fechas
-                df['AÑO'] = df['FECHA_ATENCION'].dt.year
+                df['ANO'] = df['FECHA_ATENCION'].dt.year
                 df['MES'] = df['FECHA_ATENCION'].dt.month
-                df['AÑO_MES'] = df['FECHA_ATENCION'].dt.strftime('%Y-%m')
+                df['ANO_MES'] = df['FECHA_ATENCION'].dt.strftime('%Y-%m')
                 info["fechas_ok"] = True
                 info["fechas_validas"] = fechas.notna().sum()
             else:
@@ -267,32 +267,27 @@ def analizar_archivo(file, tipo_archivo):
     except Exception as e:
         return None, f"Error al procesar el archivo: {str(e)}"
 
-# ============ FUNCIÓN PRINCIPAL: VALIDACIÓN EPI12 Y EPI15 vs SISPRO ============
-
-def validar_epi12_y_epi15_vs_sispro(df_sispro, df_epi12, df_epi15, año, mes):
+def validar_epi12_y_epi15_vs_sispro(df_sispro, df_epi12, df_epi15, ano, mes):
     """
-    Valida que EPI12 y EPI15 coincidan con SISPRO en un mes específico
-    - EPI12: Pacientes únicos por grupo etario
-    - EPI15: Total de Causas de Consulta
+    Valida que EPI12 y EPI15 coincidan con SISPRO en un mes especifico
     """
     
-    # Filtrar por mes y año
-    mask_sispro = (df_sispro['AÑO'] == año) & (df_sispro['MES'] == mes)
-    mask_epi12 = (df_epi12['AÑO'] == año) & (df_epi12['MES'] == mes)
-    mask_epi15 = (df_epi15['AÑO'] == año) & (df_epi15['MES'] == mes)
+    mask_sispro = (df_sispro['ANO'] == ano) & (df_sispro['MES'] == mes)
+    mask_epi12 = (df_epi12['ANO'] == ano) & (df_epi12['MES'] == mes)
+    mask_epi15 = (df_epi15['ANO'] == ano) & (df_epi15['MES'] == mes)
     
     df_sispro_mes = df_sispro[mask_sispro].copy()
     df_epi12_mes = df_epi12[mask_epi12].copy()
     df_epi15_mes = df_epi15[mask_epi15].copy()
     
     if len(df_sispro_mes) == 0:
-        return None, f"No hay datos de SISPRO para {mes:02d}/{año}"
+        return None, f"No hay datos de SISPRO para {mes:02d}/{ano}"
     
-    # ============ SISPRO (REFERENCIA) ============
+    # SISPRO (referencia)
     total_sispro = df_sispro_mes['IDENTIFICACION'].nunique()
     grupos_sispro = df_sispro_mes['GRUPO_ETARIO'].value_counts().to_dict()
     
-    # ============ EPI12 ============
+    # EPI12
     if len(df_epi12_mes) > 0:
         total_epi12 = df_epi12_mes['IDENTIFICACION'].nunique()
         grupos_epi12 = df_epi12_mes['GRUPO_ETARIO'].value_counts().to_dict()
@@ -300,10 +295,9 @@ def validar_epi12_y_epi15_vs_sispro(df_sispro, df_epi12, df_epi15, año, mes):
         total_epi12 = 0
         grupos_epi12 = {}
     
-    # ============ EPI15 - TOTAL DE CAUSAS DE CONSULTA ============
+    # EPI15
     if len(df_epi15_mes) > 0:
         total_epi15 = len(df_epi15_mes)
-        # Clasificación de EPI15 (si existe)
         if 'CLASIFICACION_DIAGNOSTICO' in df_epi15_mes.columns:
             clasificacion_epi15 = df_epi15_mes['CLASIFICACION_DIAGNOSTICO'].value_counts().to_dict()
         else:
@@ -312,11 +306,9 @@ def validar_epi12_y_epi15_vs_sispro(df_sispro, df_epi12, df_epi15, año, mes):
         total_epi15 = 0
         clasificacion_epi15 = {}
     
-    # ============ CALCULAR DISCREPANCIAS ============
     diff_epi12 = total_epi12 - total_sispro
     diff_epi15 = total_epi15 - total_sispro
     
-    # ============ GRUPOS ETARIOS CON DIFERENCIAS (EPI12) ============
     grupos_diferencia_epi12 = []
     if diff_epi12 != 0:
         for grupo in GRUPOS_ETARIOS.keys():
@@ -330,10 +322,8 @@ def validar_epi12_y_epi15_vs_sispro(df_sispro, df_epi12, df_epi15, año, mes):
                     'diferencia': count_sispro - count_epi12
                 })
     
-    # ============ CLASIFICACIÓN EPI15 CON DIFERENCIAS ============
     clasificacion_diferencia_epi15 = []
     if diff_epi15 != 0:
-        # Solo mostrar las categorías que existen
         for cat in ['Causa de Consulta', 'Otras Causas', 'Sin Clasificar']:
             count_epi15 = clasificacion_epi15.get(cat, 0)
             if count_epi15 > 0:
@@ -343,7 +333,7 @@ def validar_epi12_y_epi15_vs_sispro(df_sispro, df_epi12, df_epi15, año, mes):
                 })
     
     return {
-        'mes': f"{mes:02d}/{año}",
+        'mes': f"{mes:02d}/{ano}",
         'sispro': total_sispro,
         'epi12': total_epi12,
         'epi15': total_epi15,
@@ -359,20 +349,19 @@ def validar_epi12_y_epi15_vs_sispro(df_sispro, df_epi12, df_epi15, año, mes):
         'todos_coinciden': diff_epi12 == 0 and diff_epi15 == 0
     }, None
 
-def mostrar_validacion(resultado, mes_nombre, año):
-    """Muestra los resultados de la validación"""
+def mostrar_validacion(resultado, mes_nombre, ano):
+    """Muestra los resultados de la validacion"""
     
     if resultado is None:
         return
     
     st.markdown(f"""
     <div class="mes-box">
-        <h2 style="margin: 0; color: #1E3A5F;">📅 {mes_nombre} {año}</h2>
+        <h2 style="margin: 0; color: #1E3A5F;">{mes_nombre} {ano}</h2>
     </div>
     """, unsafe_allow_html=True)
     
-    # ============ RESUMEN GENERAL ============
-    st.subheader("📊 Resumen General del Mes")
+    st.subheader("Resumen General del Mes")
     
     col1, col2, col3 = st.columns(3)
     with col1:
@@ -382,13 +371,13 @@ def mostrar_validacion(resultado, mes_nombre, año):
             <p style="font-size: 2.5rem; margin: 0; color: #2e7d32; text-align: center;">
                 {resultado['sispro']:,}
             </p>
-            <p style="margin: 0; text-align: center; color: #666;">Pacientes únicos</p>
+            <p style="margin: 0; text-align: center; color: #666;">Pacientes unicos</p>
         </div>
         """, unsafe_allow_html=True)
     with col2:
         diff12 = resultado['diff_epi12']
         color12 = "#2e7d32" if diff12 == 0 else "#c62828"
-        icono12 = "✅" if diff12 == 0 else "⚠️"
+        icono12 = "OK" if diff12 == 0 else "ERR"
         st.markdown(f"""
         <div class="total-box" style="border-left-color: {color12};">
             <h4 style="margin: 0; color: #1E3A5F;">EPI12</h4>
@@ -403,7 +392,7 @@ def mostrar_validacion(resultado, mes_nombre, año):
     with col3:
         diff15 = resultado['diff_epi15']
         color15 = "#2e7d32" if diff15 == 0 else "#c62828"
-        icono15 = "✅" if diff15 == 0 else "⚠️"
+        icono15 = "OK" if diff15 == 0 else "ERR"
         st.markdown(f"""
         <div class="total-box" style="border-left-color: {color15};">
             <h4 style="margin: 0; color: #1E3A5F;">EPI15 (Causas Consulta)</h4>
@@ -416,70 +405,65 @@ def mostrar_validacion(resultado, mes_nombre, año):
         </div>
         """, unsafe_allow_html=True)
     
-    # ============ ESTADO GENERAL ============
     if resultado['todos_coinciden']:
         st.markdown(f"""
         <div class="match-box">
-            <h3 style="margin: 0; color: #2e7d32;">✅ ¡Todos los reportes coinciden correctamente!</h3>
-            <p style="margin: 0.5rem 0;">EPI12 y EPI15 están alineados con SISPRO.</p>
+            <h3 style="margin: 0; color: #2e7d32;">Todos los reportes coinciden correctamente</h3>
+            <p style="margin: 0.5rem 0;">EPI12 y EPI15 estan alineados con SISPRO.</p>
         </div>
         """, unsafe_allow_html=True)
     else:
         st.markdown(f"""
         <div class="discrepancy-box">
-            <h3 style="margin: 0; color: #c62828;">⚠️ Se encontraron discrepancias</h3>
+            <h3 style="margin: 0; color: #c62828;">Se encontraron discrepancias</h3>
         </div>
         """, unsafe_allow_html=True)
         
-        # ============ DISCREPANCIAS EPI12 ============
         if not resultado['epi12_coincide']:
-            st.subheader("🔴 Discrepancias en EPI12")
+            st.subheader("Discrepancias en EPI12")
             
             st.warning(f"EPI12 tiene {resultado['diff_epi12']:+d} pacientes comparado con SISPRO")
             
             if resultado['grupos_diferencia_epi12']:
-                st.write("**Grupos etarios con diferencias:**")
+                st.write("Grupos etarios con diferencias:")
                 df_grupos = pd.DataFrame(resultado['grupos_diferencia_epi12'])
                 st.dataframe(df_grupos, use_container_width=True, hide_index=True)
                 
-                st.write("**📌 Recomendaciones para EPI12:**")
+                st.write("Recomendaciones para EPI12:")
                 for g in resultado['grupos_diferencia_epi12']:
                     if g['diferencia'] < 0:
                         st.warning(f"- {g['grupo']}: Agregar {abs(g['diferencia'])} pacientes")
                     else:
                         st.warning(f"- {g['grupo']}: Eliminar {g['diferencia']} pacientes")
             else:
-                st.info("No se identificaron grupos etarios específicos con diferencias")
+                st.info("No se identificaron grupos etarios especificos con diferencias")
         
-        # ============ DISCREPANCIAS EPI15 ============
         if not resultado['epi15_coincide']:
-            st.subheader("🔴 Discrepancias en EPI15")
+            st.subheader("Discrepancias en EPI15")
             
             st.warning(f"EPI15 tiene {resultado['diff_epi15']:+d} Causas de Consulta comparado con SISPRO")
             
             if resultado['clasificacion_diferencia_epi15']:
-                st.write("**Clasificación de Causas de Consulta en EPI15:**")
+                st.write("Clasificacion de Causas de Consulta en EPI15:")
                 df_clasif = pd.DataFrame(resultado['clasificacion_diferencia_epi15'])
                 st.dataframe(df_clasif, use_container_width=True, hide_index=True)
             
-            st.write("**📌 Recomendaciones para EPI15:**")
+            st.write("Recomendaciones para EPI15:")
             if resultado['diff_epi15'] < 0:
                 st.warning(f"- Agregar {abs(resultado['diff_epi15'])} Causas de Consulta para igualar a SISPRO")
             else:
                 st.warning(f"- Eliminar {resultado['diff_epi15']} Causas de Consulta para igualar a SISPRO")
     
-    # ============ DETALLE DE GRUPOS ETARIOS (SISPRO vs EPI12) ============
     st.markdown("---")
-    st.subheader("📊 Detalle de Grupos Etarios (SISPRO vs EPI12)")
+    st.subheader("Detalle de Grupos Etarios (SISPRO vs EPI12)")
     
-    # Crear tabla comparativa de grupos
     grupos_data = []
     for grupo in GRUPOS_ETARIOS.keys():
         count_sispro = resultado['grupos_sispro'].get(grupo, 0)
         count_epi12 = resultado['grupos_epi12'].get(grupo, 0)
         if count_sispro > 0 or count_epi12 > 0:
             diff = count_epi12 - count_sispro
-            estado = "✅" if diff == 0 else "⚠️"
+            estado = "OK" if diff == 0 else "ERR"
             grupos_data.append({
                 'Grupo Etario': grupo,
                 'SISPRO': count_sispro,
@@ -492,65 +476,56 @@ def mostrar_validacion(resultado, mes_nombre, año):
         df_grupos_comp = pd.DataFrame(grupos_data)
         st.dataframe(df_grupos_comp, use_container_width=True, hide_index=True)
         
-        # Gráfico de grupos
-        st.write("**📊 Comparativa por Grupo Etario**")
+        st.write("Comparativa por Grupo Etario")
         chart_grupos = df_grupos_comp.set_index('Grupo Etario')[['SISPRO', 'EPI12']]
         st.bar_chart(chart_grupos)
     
-    # ============ DETALLE DE EPI15 ============
     st.markdown("---")
-    st.subheader("📊 Detalle de EPI15 - Causas de Consulta")
+    st.subheader("Detalle de EPI15 - Causas de Consulta")
     
     if resultado['clasificacion_epi15']:
         df_clasif_total = pd.DataFrame({
-            'Categoría': list(resultado['clasificacion_epi15'].keys()),
+            'Categoria': list(resultado['clasificacion_epi15'].keys()),
             'Cantidad': list(resultado['clasificacion_epi15'].values())
         })
         st.dataframe(df_clasif_total, use_container_width=True, hide_index=True)
         
-        st.write(f"**Total de Causas de Consulta en EPI15:** {resultado['epi15']:,}")
-        
-        # Comparativa con SISPRO
-        st.write(f"**SISPRO (Referencia):** {resultado['sispro']:,} pacientes")
-        st.write(f"**Diferencia:** {resultado['diff_epi15']:+d}")
+        st.write(f"Total de Causas de Consulta en EPI15: {resultado['epi15']:,}")
+        st.write(f"SISPRO (Referencia): {resultado['sispro']:,} pacientes")
+        st.write(f"Diferencia: {resultado['diff_epi15']:+d}")
     
-    # ============ BOTÓN DE DESCARGA ============
     st.markdown("---")
-    st.subheader("💾 Descargar Reporte")
+    st.subheader("Descargar Reporte")
     
-    if st.button("📥 Descargar Validación", key="btn_descargar_validacion"):
+    if st.button("Descargar Validacion", key="btn_descargar_validacion"):
         try:
             output = BytesIO()
             with pd.ExcelWriter(output, engine='openpyxl') as writer:
-                # Hoja: Resumen
                 resumen = pd.DataFrame([
-                    {'Métrica': 'Mes', 'Valor': f"{mes_nombre} {año}"},
-                    {'Métrica': 'SISPRO (Referencia)', 'Valor': resultado['sispro']},
-                    {'Métrica': 'EPI12', 'Valor': resultado['epi12'], 'Diferencia': resultado['diff_epi12']},
-                    {'Métrica': 'EPI15 (Causas Consulta)', 'Valor': resultado['epi15'], 'Diferencia': resultado['diff_epi15']}
+                    {'Metrica': 'Mes', 'Valor': f"{mes_nombre} {ano}"},
+                    {'Metrica': 'SISPRO (Referencia)', 'Valor': resultado['sispro']},
+                    {'Metrica': 'EPI12', 'Valor': resultado['epi12'], 'Diferencia': resultado['diff_epi12']},
+                    {'Metrica': 'EPI15 (Causas Consulta)', 'Valor': resultado['epi15'], 'Diferencia': resultado['diff_epi15']}
                 ])
                 resumen.to_excel(writer, sheet_name='Resumen', index=False)
                 
-                # Hoja: Grupos Etarios
                 if grupos_data:
                     pd.DataFrame(grupos_data).to_excel(writer, sheet_name='Grupos_Etarios', index=False)
                 
-                # Hoja: Discrepancias EPI12
                 if resultado['grupos_diferencia_epi12']:
                     pd.DataFrame(resultado['grupos_diferencia_epi12']).to_excel(writer, sheet_name='Discrepancias_EPI12', index=False)
                 
-                # Hoja: Clasificación EPI15
                 if resultado['clasificacion_epi15']:
                     pd.DataFrame(df_clasif_total).to_excel(writer, sheet_name='Clasificacion_EPI15', index=False)
             
             output.seek(0)
             st.download_button(
-                label="📥 Descargar Excel",
+                label="Descargar Excel",
                 data=output,
-                file_name=f"validacion_{año}_{mes:02d}_{mes_nombre}.xlsx",
+                file_name=f"validacion_{ano}_{mes:02d}_{mes_nombre}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
             )
-            st.success("✅ Reporte exportado exitosamente!")
+            st.success("Reporte exportado exitosamente!")
         except Exception as e:
             st.error(f"Error al exportar: {str(e)}")
 
@@ -563,26 +538,26 @@ def mostrar_analisis(df, info, tipo_archivo):
     
     with col1:
         st.markdown('<div class="success-box">', unsafe_allow_html=True)
-        st.subheader("📊 Resumen del Archivo")
+        st.subheader("Resumen del Archivo")
         st.write(f"**Tipo:** {tipo_archivo}")
         st.write(f"**Registros:** {info['filas']:,}")
-        st.write(f"**Pacientes únicos:** {info.get('estadisticas', {}).get('pacientes_unicos', 'N/A')}")
+        st.write(f"**Pacientes unicos:** {info.get('estadisticas', {}).get('pacientes_unicos', 'N/A')}")
         
         if info.get('fechas_ok', False):
             st.write(f"**Columna de fecha:** {info.get('columna_fecha_detectada', 'N/A')}")
-            st.write(f"**Fechas válidas:** {info.get('fechas_validas', 0)} de {info['filas']}")
+            st.write(f"**Fechas validas:** {info.get('fechas_validas', 0)} de {info['filas']}")
         else:
-            st.warning(f"⚠️ {info.get('error_fechas', 'Problema con fechas')}")
+            st.warning(f" {info.get('error_fechas', 'Problema con fechas')}")
         
         st.markdown('</div>', unsafe_allow_html=True)
     
     with col2:
         if info.get("estadisticas"):
-            st.subheader("📈 Estadísticas")
+            st.subheader("Estadisticas")
             estadisticas = info["estadisticas"]
             st.write(f"**Fecha de carga:** {info['fecha_carga']}")
 
-# ============ INICIALIZACIÓN ============
+# ============ INICIALIZACION ============
 
 if 'dataframes' not in st.session_state:
     st.session_state.dataframes = {}
@@ -592,23 +567,23 @@ if 'infos' not in st.session_state:
 # ============ INTERFAZ PRINCIPAL ============
 
 tab1, tab2, tab3 = st.tabs([
-    "📤 Carga de Archivos",
-    "📊 Validación EPI12 y EPI15 vs SISPRO (NUEVO)",
-    "📋 Reporte Consolidado"
+    "Carga de Archivos",
+    "Validacion EPI12 y EPI15 vs SISPRO",
+    "Reporte Consolidado"
 ])
 
 with tab1:
     st.header("Carga de Archivos SISPRO, EPI12 y EPI15")
     st.markdown("""
     <div class="info-box">
-    💡 <b>Instrucciones:</b> Sube los archivos Excel (.xls o .xlsx) correspondientes a cada tipo de formato.
+    Instrucciones: Sube los archivos Excel (.xls o .xlsx) correspondientes a cada tipo de formato.
     </div>
     """, unsafe_allow_html=True)
     
     col1, col2, col3 = st.columns(3)
     
     with col1:
-        st.subheader("🏥 SISPRO")
+        st.subheader("SISPRO")
         file_sispro = st.file_uploader("Subir archivo SISPRO", type=['xls', 'xlsx'], key="sispro")
         if file_sispro:
             with st.spinner("Procesando archivo SISPRO..."):
@@ -616,13 +591,13 @@ with tab1:
                 if isinstance(info, dict):
                     st.session_state.dataframes['SISPRO'] = df
                     st.session_state.infos['SISPRO'] = info
-                    st.success(f"✅ SISPRO cargado exitosamente - {info['filas']} registros")
+                    st.success(f"SISPRO cargado exitosamente - {info['filas']} registros")
                     mostrar_analisis(df, info, "SISPRO")
                 else:
-                    st.error(f"❌ {info}")
+                    st.error(f"Error: {info}")
     
     with col2:
-        st.subheader("📋 EPI12")
+        st.subheader("EPI12")
         file_epi12 = st.file_uploader("Subir archivo EPI12", type=['xls', 'xlsx'], key="epi12")
         if file_epi12:
             with st.spinner("Procesando archivo EPI12..."):
@@ -630,13 +605,13 @@ with tab1:
                 if isinstance(info, dict):
                     st.session_state.dataframes['EPI12'] = df
                     st.session_state.infos['EPI12'] = info
-                    st.success(f"✅ EPI12 cargado exitosamente - {info['filas']} registros")
+                    st.success(f"EPI12 cargado exitosamente - {info['filas']} registros")
                     mostrar_analisis(df, info, "EPI12")
                 else:
-                    st.error(f"❌ {info}")
+                    st.error(f"Error: {info}")
     
     with col3:
-        st.subheader("📊 EPI15")
+        st.subheader("EPI15")
         file_epi15 = st.file_uploader("Subir archivo EPI15", type=['xls', 'xlsx'], key="epi15")
         if file_epi15:
             with st.spinner("Procesando archivo EPI15..."):
@@ -644,16 +619,16 @@ with tab1:
                 if isinstance(info, dict):
                     st.session_state.dataframes['EPI15'] = df
                     st.session_state.infos['EPI15'] = info
-                    st.success(f"✅ EPI15 cargado exitosamente - {info['filas']} registros")
+                    st.success(f"EPI15 cargado exitosamente - {info['filas']} registros")
                     mostrar_analisis(df, info, "EPI15")
                 else:
-                    st.error(f"❌ {info}")
+                    st.error(f"Error: {info}")
 
 with tab2:
-    st.header("📊 Validación EPI12 y EPI15 vs SISPRO")
+    st.header("Validacion EPI12 y EPI15 vs SISPRO")
     st.markdown("""
     <div class="info-box">
-    💡 <b>Instrucciones:</b> Selecciona un mes para validar que EPI12 y EPI15 coincidan con SISPRO.
+    Instrucciones: Selecciona un mes para validar que EPI12 y EPI15 coincidan con SISPRO.
     </div>
     """, unsafe_allow_html=True)
     
@@ -663,56 +638,56 @@ with tab2:
         df_epi15 = st.session_state.dataframes['EPI15']
         
         if 'FECHA_ATENCION' in df_sispro.columns and not df_sispro['FECHA_ATENCION'].isna().all():
-            años_disponibles = sorted(df_sispro['AÑO'].dropna().unique().astype(int).tolist())
+            anos_disponibles = sorted(df_sispro['ANO'].dropna().unique().astype(int).tolist())
             
-            if años_disponibles:
+            if anos_disponibles:
                 col1, col2 = st.columns(2)
                 
                 with col1:
-                    año_seleccionado = st.selectbox(
+                    ano_seleccionado = st.selectbox(
                         "Seleccionar Año:",
-                        años_disponibles,
-                        key="año_validacion"
+                        anos_disponibles,
+                        key="ano_validacion"
                     )
                 
                 with col2:
-                    meses_año = sorted(df_sispro[df_sispro['AÑO'] == año_seleccionado]['MES'].dropna().unique().astype(int).tolist())
+                    meses_ano = sorted(df_sispro[df_sispro['ANO'] == ano_seleccionado]['MES'].dropna().unique().astype(int).tolist())
                     nombres_meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
                     mes_seleccionado = st.selectbox(
                         "Seleccionar Mes:",
-                        meses_año,
+                        meses_ano,
                         format_func=lambda x: f"{x:02d} - {nombres_meses[x-1]}",
                         key="mes_validacion"
                     )
                 
                 mes_nombre = nombres_meses[mes_seleccionado - 1]
                 
-                if st.button("🔍 Validar Reportes", type="primary", key="btn_validar"):
-                    with st.spinner(f"Validando {mes_nombre} {año_seleccionado}..."):
+                if st.button("Validar Reportes", type="primary", key="btn_validar"):
+                    with st.spinner(f"Validando {mes_nombre} {ano_seleccionado}..."):
                         resultado, error = validar_epi12_y_epi15_vs_sispro(
                             df_sispro,
                             df_epi12,
                             df_epi15,
-                            año_seleccionado,
+                            ano_seleccionado,
                             mes_seleccionado
                         )
                         
                         if error:
-                            st.error(f"❌ {error}")
+                            st.error(f"Error: {error}")
                         else:
-                            mostrar_validacion(resultado, mes_nombre, año_seleccionado)
+                            mostrar_validacion(resultado, mes_nombre, ano_seleccionado)
             else:
                 st.warning("No se encontraron años disponibles")
         else:
-            st.warning("No se encontraron fechas válidas en SISPRO")
+            st.warning("No se encontraron fechas validas en SISPRO")
     else:
-        st.info("ℹ️ Primero carga los archivos SISPRO, EPI12 y EPI15")
+        st.info("Primero carga los archivos SISPRO, EPI12 y EPI15")
 
 with tab3:
-    st.header("📋 Reporte Consolidado")
+    st.header("Reporte Consolidado")
     
     if st.session_state.dataframes:
-        st.subheader("📊 Resumen General de Todos los Reportes")
+        st.subheader("Resumen General de Todos los Reportes")
         
         resumen_consolidado = []
         for nombre, df in st.session_state.dataframes.items():
@@ -722,25 +697,25 @@ with tab3:
             resumen_consolidado.append({
                 'Fuente': nombre,
                 'Registros': len(df),
-                'Pacientes Únicos': estadisticas.get('pacientes_unicos', 'N/A'),
-                'Fechas Válidas': info.get('fechas_validas', 'N/A')
+                'Pacientes Unicos': estadisticas.get('pacientes_unicos', 'N/A'),
+                'Fechas Validas': info.get('fechas_validas', 'N/A')
             })
         
         st.dataframe(pd.DataFrame(resumen_consolidado), use_container_width=True)
     else:
-        st.info("ℹ️ No hay archivos cargados")
+        st.info("No hay archivos cargados")
 
 # Barra lateral
 st.sidebar.markdown("---")
-st.sidebar.markdown("### ℹ️ Información de la Aplicación")
+st.sidebar.markdown("### Informacion de la Aplicacion")
 st.sidebar.markdown("""
-**Versión:** 6.0  
+**Version:** 6.0  
 **Desarrollador:** Willian Almenar  
 **Fecha:** 2024  
-**Propósito:** Validación de reportes
+**Proposito:** Validacion de reportes
 """)
 
-st.sidebar.markdown("### 📊 Validación Realizada")
+st.sidebar.markdown("### Validacion Realizada")
 st.sidebar.markdown("""
 - **SISPRO:** Referencia (Total Real)
 - **EPI12:** Pacientes por grupo etario
@@ -748,31 +723,13 @@ st.sidebar.markdown("""
 - **Discrepancias identificadas**
 """)
 
-st.sidebar.markdown("### 📅 Grupos Etarios")
-st.sidebar.markdown("""
-- 0-4 años
-- 5-9 años
-- 10-14 años
-- 15-19 años
-- 20-24 años
-- 25-29 años
-- 30-34 años
-- 35-39 años
-- 40-44 años
-- 45-49 años
-- 50-54 años
-- 55-59 años
-- 60-64 años
-- 65+ años
-""")
-
 total_archivos = len(st.session_state.dataframes)
-st.sidebar.markdown(f"### 📁 Archivos cargados: {total_archivos}/3")
+st.sidebar.markdown(f"### Archivos cargados: {total_archivos}/3")
 if total_archivos > 0:
     for nombre in st.session_state.dataframes.keys():
-        st.sidebar.success(f"✅ {nombre}")
+        st.sidebar.success(f"OK {nombre}")
 
-if st.sidebar.button("🔄 Limpiar todos los datos"):
+if st.sidebar.button("Limpiar todos los datos"):
     st.session_state.dataframes = {}
     st.session_state.infos = {}
     st.sidebar.success("Datos limpiados exitosamente!")
