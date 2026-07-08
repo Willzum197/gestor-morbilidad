@@ -777,3 +777,55 @@ if st.sidebar.button("🔄 Limpiar todos los datos"):
     st.session_state.infos = {}
     st.sidebar.success("Datos limpiados exitosamente!")
     st.rerun()
+🎯 Lo que hace esta nueva versión:
+1. Validación Completa por Mes
+SISPRO: Total de pacientes (referencia)
+
+EPI12: Total de pacientes y desglose por grupo etario
+
+EPI15: Total de Causas de Consulta y clasificación
+
+2. Identificación de Discrepancias
+EPI12: Muestra qué grupo etario tiene diferencias
+
+EPI15: Muestra el total de Causas de Consulta y su clasificación
+
+3. Recomendaciones
+Indica exactamente qué corregir en cada reporte
+
+Cuántos pacientes/causas agregar o eliminar
+
+4. Visualización
+Tabla comparativa de grupos etarios
+
+Gráfico de barras comparativo
+
+Resumen claro de estado
+
+📊 Ejemplo de resultado:
+text
+📅 Enero 2026
+
+📊 Resumen General del Mes
+| SISPRO | EPI12 | EPI15 |
+| 65     | 63    | 63    |
+
+⚠️ Se encontraron discrepancias
+
+🔴 Discrepancias en EPI12
+EPI12 tiene -2 pacientes comparado con SISPRO
+
+Grupos etarios con diferencias:
+| Grupo Etario | SISPRO | EPI12 | Diferencia |
+| 0-4 años     | 15     | 13    | -2         |
+
+📌 Recomendaciones para EPI12:
+- 0-4 años: Agregar 2 pacientes
+
+🔴 Discrepancias en EPI15
+EPI15 tiene -2 Causas de Consulta comparado con SISPRO
+
+📌 Recomendaciones para EPI15:
+- Agregar 2 Causas de Consulta para igualar a SISPRO
+Ahora la aplicación valida que EPI12 y EPI15 coincidan con SISPRO mes a mes. 🚀
+
